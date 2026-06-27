@@ -13,6 +13,7 @@ namespace CSiNET8PluginExample1
                 return;
             }
 
+            // ── Loads ──────────────────────────────────────────────────
             double selfWeight = (slab.Thickness / 1000.0) * 25.0; // kN/m2
             double totalDL = selfWeight + slab.DeadLoad + slab.SuperimposedDeadLoad;
             double totalService = totalDL + slab.LiveLoad;

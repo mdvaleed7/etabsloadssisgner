@@ -193,7 +193,153 @@ namespace CSiNET8PluginExample1
             var analyzer = new GeometricTopologyAnalyzer(_sapModel, lenToM);
             analyzer.AnalyzeSlabs(slabs);
 
+            // --- Extract Column & Drop Panel details for Flat Slabs ---
+            ExtractFlatSlabProperties(slabs, lenToM);
+
             return slabs;
+        }
+
+        private void ExtractFlatSlabProperties(List<SlabData> slabs, double lenToM)
+        {
+            // 1. Get all vertical frames (columns) and their sections
+            int numFrames = 0;
+            string[] frameNames = null;
+            _sapModel.FrameObj.GetNameList(ref numFrames, ref frameNames);
+
+            var columnTopPoints = new Dictionary<string, (double t3, double t2)>(); // Point Name -> Dimensions
+
+            if (numFrames > 0 && frameNames != null)
+            {
+                foreach (var fname in frameNames)
+                {
+                    string p1 = "", p2 = "";
+                    _sapModel.FrameObj.GetPoints(fname, ref p1, ref p2);
+                    
+                    double x1=0, y1=0, z1=0, x2=0, y2=0, z2=0;
+                    _sapModel.PointObj.GetCoordCartesian(p1, ref x1, ref y1, ref z1);
+                    _sapModel.PointObj.GetCoordCartesian(p2, ref x2, ref y2, ref z2);
+
+                    // If vertical
+                    if (Math.Abs(z1 - z2) > 0.1 && Math.Abs(x1 - x2) < 0.1 && Math.Abs(y1 - y2) < 0.1)
+                    {
+                        string propName = "", sAuto = "";
+                        _sapModel.FrameObj.GetSection(fname, ref propName, ref sAuto);
+
+                        string fileName = "", matProp = "", notes = "", guid = "";
+                        double t3 = 0, t2 = 0;
+                        int color = 0;
+
+                        // Try to get rectangular section properties
+                        int ret = _sapModel.PropFrame.GetRectangle(propName, ref fileName, ref matProp, ref t3, ref t2, ref color, ref notes, ref guid);
+                        if (ret == 0) // Success
+                        {
+                            // Map the top point of the column
+                            string topPoint = z1 > z2 ? p1 : p2;
+                            columnTopPoints[topPoint] = (t3 * lenToM * 1000.0, t2 * lenToM * 1000.0); // mm
+                        }
+                    }
+                }
+            }
+
+            foreach (var slab in slabs.Where(s => s.Type == SlabType.FlatSlab))
+            {
+                int numPoints = 0;
+                string[] pointNames = null;
+                _sapModel.AreaObj.GetPoints(slab.Name, ref numPoints, ref pointNames);
+
+                double max_t3 = 400, max_t2 = 400; // Defaults
+                bool foundCol = false;
+
+                if (numPoints > 0 && pointNames != null)
+                {
+                    foreach (var pt in pointNames)
+                    {
+                        if (columnTopPoints.ContainsKey(pt))
+                        {
+                            max_t3 = Math.Max(max_t3, columnTopPoints[pt].t3);
+                            max_t2 = Math.Max(max_t2, columnTopPoints[pt].t2);
+                            foundCol = true;
+                        }
+                    }
+                }
+
+                // --- Drop Panel Extraction ---
+                // We find any other Area object in the model that shares this column point
+                // and has a greater thickness.
+                slab.HasDrop = false;
+
+                if (foundCol)
+                {
+                    slab.c1 = max_t3;
+                    slab.c2 = max_t2;
+
+                    int numTotalAreas = 0;
+                    string[] allAreaNames = null;
+                    _sapModel.AreaObj.GetNameList(ref numTotalAreas, ref allAreaNames);
+
+                    if (numTotalAreas > 0 && allAreaNames != null)
+                    {
+                        foreach (var aName in allAreaNames)
+                        {
+                            if (aName == slab.Name) continue;
+
+                            int nPts = 0;
+                            string[] pts = null;
+                            _sapModel.AreaObj.GetPoints(aName, ref nPts, ref pts);
+
+                            bool sharesColPoint = false;
+                            foreach (var p in pts)
+                            {
+                                if (pointNames.Contains(p) && columnTopPoints.ContainsKey(p))
+                                {
+                                    sharesColPoint = true;
+                                    break;
+                                }
+                            }
+
+                            if (sharesColPoint)
+                            {
+                                // Check thickness
+                                string propName = "";
+                                _sapModel.AreaObj.GetProperty(aName, ref propName);
+
+                                eSlabType sType = eSlabType.Slab;
+                                eShellType shType = eShellType.ShellThin;
+                                string mat = "", notes = "", guid = "";
+                                double thickness = 0;
+                                int color = 0;
+                                
+                                int ret = _sapModel.PropArea.GetSlab(propName, ref sType, ref shType, ref mat, ref thickness, ref color, ref notes, ref guid);
+                                
+                                if (ret == 0)
+                                {
+                                    double dropD_mm = thickness * lenToM * 1000.0;
+                                    if (dropD_mm > slab.Thickness)
+                                    {
+                                        // It's a drop panel! Calculate its footprint (approximate bounding box)
+                                        double minX = double.MaxValue, maxX = double.MinValue;
+                                        double minY = double.MaxValue, maxY = double.MinValue;
+
+                                        foreach (var p in pts)
+                                        {
+                                            double x=0, y=0, z=0;
+                                            _sapModel.PointObj.GetCoordCartesian(p, ref x, ref y, ref z);
+                                            minX = Math.Min(minX, x); maxX = Math.Max(maxX, x);
+                                            minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
+                                        }
+
+                                        slab.HasDrop = true;
+                                        slab.DropDepth = dropD_mm;
+                                        slab.DropL1 = (maxX - minX) * lenToM * 1000.0;
+                                        slab.DropL2 = (maxY - minY) * lenToM * 1000.0;
+                                        break; // Found the drop panel for this column
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

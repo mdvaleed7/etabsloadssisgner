@@ -63,5 +63,14 @@ namespace CSiNET8PluginExample1
         public string Bars_y_bot { get; set; } = "";
         public string Bars_x_top { get; set; } = "";
         public string Bars_y_top { get; set; } = "";
+
+        // Flat Slab specific properties
+        public double c1 { get; set; } = 400; // Column dimension (mm)
+        public double c2 { get; set; } = 400; // Column dimension (mm)
+        public bool HasDrop { get; set; } = false;
+        public double DropL1 { get; set; } = 0; // Drop span (mm)
+        public double DropL2 { get; set; } = 0; // Drop span (mm)
+        public double DropDepth { get; set; } = 0; // Total thickness at drop (mm)
+        public string PunchingShearStatus { get; set; } = "";
     }
 }
