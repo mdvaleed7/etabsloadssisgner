@@ -13,11 +13,42 @@ namespace CSiNET8PluginExample1
         private int errorCode = 0; 
         private List<SlabData> _currentSlabs = new List<SlabData>();
 
+        // Extended UI Controls
+        private Button btnPushAllToEtabs;
+        private Label lblAstTop;
+        private Label lblAstBot;
+        private Label lblFlatSlabGeom;
+        private Label lblPunchingShear;
+
         public Form1()
         {
             InitializeComponent();
             FormClosing += Form1_FormClosing;
             SetupGrid();
+            SetupExtendedUI();
+        }
+
+        private void SetupExtendedUI()
+        {
+            // Push All Button
+            btnPushAllToEtabs = new Button();
+            btnPushAllToEtabs.Location = new System.Drawing.Point(15, 250);
+            btnPushAllToEtabs.Size = new System.Drawing.Size(265, 40);
+            btnPushAllToEtabs.Text = "Push ALL Optimized Thicknesses";
+            btnPushAllToEtabs.Enabled = false;
+            btnPushAllToEtabs.Click += btnPushAllToEtabs_Click;
+            panelProperties.Controls.Add(btnPushAllToEtabs);
+
+            // Details Labels
+            lblAstTop = new Label { Location = new System.Drawing.Point(15, 310), Size = new System.Drawing.Size(265, 35), Text = "Top Steel:\n-" };
+            lblAstBot = new Label { Location = new System.Drawing.Point(15, 355), Size = new System.Drawing.Size(265, 35), Text = "Bottom Steel:\n-" };
+            lblFlatSlabGeom = new Label { Location = new System.Drawing.Point(15, 400), Size = new System.Drawing.Size(265, 15), Text = "Geometry: -", Visible = false };
+            lblPunchingShear = new Label { Location = new System.Drawing.Point(15, 420), Size = new System.Drawing.Size(265, 15), Text = "Punching: -", Visible = false };
+
+            panelProperties.Controls.Add(lblAstTop);
+            panelProperties.Controls.Add(lblAstBot);
+            panelProperties.Controls.Add(lblFlatSlabGeom);
+            panelProperties.Controls.Add(lblPunchingShear);
         }
 
         private void SetupGrid()
@@ -85,6 +116,10 @@ namespace CSiNET8PluginExample1
                 {
                     MessageBox.Show("No slabs found in the ETABS model.");
                 }
+                else
+                {
+                    if (btnPushAllToEtabs != null) btnPushAllToEtabs.Enabled = true;
+                }
             }
             catch (Exception ex)
             {
@@ -121,11 +156,24 @@ namespace CSiNET8PluginExample1
                         lblDeflection.Text = "Deflection: " + slab.Notes;
                     }
                     
-                    // Show all bar selections in the notes string or we can just append it to lblDeflection for now
-                    lblDeflection.Text += $"\nBot: X={slab.Bars_x_bot}, Y={slab.Bars_y_bot} | Top: X={slab.Bars_x_top}, Y={slab.Bars_y_top}";
+                    lblAstTop.Text = $"Top Steel:\nX: {slab.Bars_x_top}\nY: {slab.Bars_y_top}";
+                    lblAstBot.Text = $"Bot Steel:\nX: {slab.Bars_x_bot}\nY: {slab.Bars_y_bot}";
+
+                    if (slab.Type == SlabType.FlatSlab)
+                    {
+                        lblFlatSlabGeom.Visible = true;
+                        lblPunchingShear.Visible = true;
+                        lblFlatSlabGeom.Text = $"Cols: {slab.c1}x{slab.c2} mm" + (slab.HasDrop ? $" | Drop: {slab.DropDepth}mm" : "");
+                        lblPunchingShear.Text = $"Punching: {slab.PunchingShearStatus}";
+                    }
+                    else
+                    {
+                        lblFlatSlabGeom.Visible = false;
+                        lblPunchingShear.Visible = false;
+                    }
                     
                     btnPushToEtabs.Enabled = true;
-                    btnPushToEtabs.Tag = slab; // Store the slab object in the button for easy access
+                    btnPushToEtabs.Tag = slab; 
                 }
             }
             else
@@ -134,6 +182,10 @@ namespace CSiNET8PluginExample1
                 lblThickness.Text = "Thickness: -";
                 lblDeflection.Text = "Deflection: -";
                 lblStatus.Text = "Status: -";
+                lblAstTop.Text = "Top Steel:\n-";
+                lblAstBot.Text = "Bottom Steel:\n-";
+                lblFlatSlabGeom.Visible = false;
+                lblPunchingShear.Visible = false;
                 btnPushToEtabs.Enabled = false;
             }
         }
@@ -152,6 +204,24 @@ namespace CSiNET8PluginExample1
                     MessageBox.Show("ETABS model is not attached.", "Error");
                 }
             }
+        }
+
+        private void btnPushAllToEtabs_Click(object sender, EventArgs e)
+        {
+            if (_sapModel == null)
+            {
+                MessageBox.Show("ETABS model is not attached.", "Error");
+                return;
+            }
+
+            var updater = new EtabsModelUpdater(_sapModel);
+            int count = 0;
+            foreach (var slab in _currentSlabs)
+            {
+                updater.PushOptimizedThickness(slab);
+                count++;
+            }
+            MessageBox.Show($"Successfully pushed updated thickness for {count} slabs to ETABS!", "Success");
         }
     }
 }
