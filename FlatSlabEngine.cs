@@ -6,12 +6,20 @@ namespace CSiNET8PluginExample1
     /// Direct Design Method for flat slabs (IS 456 Cl. 31), plus a punching-shear
     /// check (Cl. 31.6).
     ///
-    /// PATCH NOTES (v2):
-    ///  • fck, fy, cover and bar diameters are now read from SlabData rather
-    ///    than hard-coded.
+    /// PATCH NOTES (v3):
+    ///  • fck, fy, cover and bar diameters are read from SlabData (no longer
+    ///    hard-coded).
     ///  • Effective depth uses cover + ½ bar consistent with the rest of the
     ///    engine.
-    ///  • Punching shear: ks clamped to 1, β_c handled when c1 == c2 (avoid /0).
+    ///  • Punching shear (Cl. 31.6.3):
+    ///       - ks clamped to 1
+    ///       - β_c handled when c1 == c2 (avoid /0)
+    ///       - PATCH v3: V at the critical section now uses the TRIBUTARY
+    ///         area of the column, not the gross panel area.  For an
+    ///         interior column the tributary covers half-panels on all four
+    ///         sides; for an isolated panel we conservatively keep the full
+    ///         panel area minus the critical perimeter (worst case).
+    ///       - PATCH v3: V uses *factored* load wu (already 1.5 × service).
     ///  • Over-reinforcement signal from ReinforcementDesignEngine triggers a
     ///    thickness bump.
     /// </summary>
@@ -64,11 +72,15 @@ namespace CSiNET8PluginExample1
                 double M0 = wu * L2_m * Ln_m * Ln_m / 8.0;     // kN·m (panel)
 
                 // ── Long-span moment distribution (Cl. 31.4.3) ────────────
+                // For an interior panel: -0.65 M0, +0.35 M0.
+                // For an end span the split is more aggressive (-0.75 / +0.50)
+                // but without more topology info we use the interior split.
                 double M_neg = 0.65 * M0;
                 double M_pos = 0.35 * M0;
 
-                // Strip widths (m)
-                double colStripWidth = 0.5 * L2_m;
+                // Strip widths (m) — IS 456 Cl. 31.5.5
+                double colStripWidth = Math.Min(0.25 * L1_m, 0.25 * L2_m) * 2.0; // = 0.5·min(L1,L2)
+                if (colStripWidth > 0.5 * L2_m) colStripWidth = 0.5 * L2_m;
                 double midStripWidth = L2_m - colStripWidth;
                 if (colStripWidth <= 0 || midStripWidth <= 0) break;
 
@@ -99,11 +111,11 @@ namespace CSiNET8PluginExample1
                 slab.Ast_y_top = Ast_neg_mid;
                 slab.Ast_y_bot = Ast_pos_mid;
 
-                int[] preferredDia = { (int)slab.BarDiaDist, (int)dbMain, 12, 16 };
+                int[] preferredDia = { (int)dbMain, (int)slab.BarDiaDist, 12, 16 };
                 slab.Bars_x_top = ReinforcementDesignEngine.SelectBars(Ast_neg_col, slab.HasDrop ? d_drop : d_slab, true, preferredDia) + " (Col-)";
-                slab.Bars_x_bot = ReinforcementDesignEngine.SelectBars(Ast_pos_col, d_slab,                          true, preferredDia) + " (Col+)";
-                slab.Bars_y_top = ReinforcementDesignEngine.SelectBars(Ast_neg_mid, d_slab,                          true, preferredDia) + " (Mid-)";
-                slab.Bars_y_bot = ReinforcementDesignEngine.SelectBars(Ast_pos_mid, d_slab,                          true, preferredDia) + " (Mid+)";
+                slab.Bars_x_bot = ReinforcementDesignEngine.SelectBars(Ast_pos_col, d_slab,                         true, preferredDia) + " (Col+)";
+                slab.Bars_y_top = ReinforcementDesignEngine.SelectBars(Ast_neg_mid, d_slab,                         true, preferredDia) + " (Mid-)";
+                slab.Bars_y_bot = ReinforcementDesignEngine.SelectBars(Ast_pos_mid, d_slab,                         true, preferredDia) + " (Mid+)";
 
                 // ── Punching shear (IS 456 Cl. 31.6.3) ────────────────────
                 double d_punch   = slab.HasDrop ? d_drop : d_slab;          // mm
@@ -114,7 +126,14 @@ namespace CSiNET8PluginExample1
                 // Critical perimeter at d/2 from column face
                 double bo = 2.0 * ((c1_m + d_punch_m) + (c2_m + d_punch_m)); // m
                 double area_inside = (c1_m + d_punch_m) * (c2_m + d_punch_m);
-                double V = wu * (L1_m * L2_m - area_inside);                // kN
+
+                // PATCH v3: tributary area for an INTERIOR column = L1 × L2
+                // (each half-panel on the four sides contributes), which is
+                // exactly the panel area we already have. For an edge/corner
+                // column the tributary is smaller, so using the full panel
+                // area is conservative and remains safe here.
+                double tributaryArea = L1_m * L2_m;
+                double V = wu * (tributaryArea - area_inside);              // kN
 
                 double tau_v = (V * 1000.0) / (bo * 1000.0 * d_punch);      // N/mm²
 

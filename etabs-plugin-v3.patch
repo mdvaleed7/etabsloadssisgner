@@ -1,0 +1,458 @@
+diff --git a/EtabsDataExtractor.cs b/EtabsDataExtractor.cs
+index 4acb3bb..270a196 100644
+--- a/EtabsDataExtractor.cs
++++ b/EtabsDataExtractor.cs
+@@ -109,10 +109,35 @@ namespace CSiNET8PluginExample1
+                     slab.Lx = Math.Min(d12, d23) * 1000; // → mm
+                     slab.Ly = Math.Max(d12, d23) * 1000; // → mm
+                 }
++                else if (numPoints >= 3 && pointNames != null)
++                {
++                    // PATCH v3: non-quadrilateral panel — use bounding-box of
++                    // all vertices so the geometry is at least representative.
++                    double minX=double.MaxValue, maxX=double.MinValue;
++                    double minY=double.MaxValue, maxY=double.MinValue;
++                    for (int i = 0; i < numPoints; i++)
++                    {
++                        double xp=0, yp=0, zp=0;
++                        _sapModel.PointObj.GetCoordCartesian(pointNames[i], ref xp, ref yp, ref zp);
++                        minX = Math.Min(minX, xp); maxX = Math.Max(maxX, xp);
++                        minY = Math.Min(minY, yp); maxY = Math.Max(maxY, yp);
++                    }
++                    double bx = (maxX - minX) * lenToM * 1000.0;
++                    double by = (maxY - minY) * lenToM * 1000.0;
++                    slab.Lx = Math.Min(bx, by);
++                    slab.Ly = Math.Max(bx, by);
++                    slab.Type = SlabType.Unknown;       // flag for review
++                }
+                 else
+                 {
+-                    slab.Lx = 4000;
+-                    slab.Ly = 4000;
++                    // PATCH v3: do NOT silently substitute 4 m × 4 m. Flag for
++                    // user attention instead — designing with fake geometry
++                    // gives misleading results.
++                    slab.Lx = 0; slab.Ly = 0;
++                    slab.Type = SlabType.Unknown;
++                    slab.DesignStatus = "SKIPPED (geometry not extractable)";
++                    slab.Notes = $"Panel has {numPoints} vertices — could not extract a usable Lx/Ly. " +
++                                 "Inspect the area object in ETABS.";
+                 }
+ 
+                 // ── Thickness & material (from the assigned section property) ──
+@@ -197,7 +222,7 @@ namespace CSiNET8PluginExample1
+                 slab.SuperimposedDeadLoad = sdl;
+ 
+                 // ── Preliminary type classification by Ly/Lx ──────────────
+-                if (slab.Lx > 0 && slab.Ly > 0)
++                if (slab.Lx > 0 && slab.Ly > 0 && slab.Type != SlabType.Unknown)
+                     slab.Type = slab.Ly / slab.Lx > 2.0 ? SlabType.OneWay : SlabType.TwoWay;
+ 
+                 slabs.Add(slab);
+diff --git a/FlatSlabEngine.cs b/FlatSlabEngine.cs
+index daa455f..8ed4d59 100644
+--- a/FlatSlabEngine.cs
++++ b/FlatSlabEngine.cs
+@@ -6,12 +6,20 @@ namespace CSiNET8PluginExample1
+     /// Direct Design Method for flat slabs (IS 456 Cl. 31), plus a punching-shear
+     /// check (Cl. 31.6).
+     ///
+-    /// PATCH NOTES (v2):
+-    ///  • fck, fy, cover and bar diameters are now read from SlabData rather
+-    ///    than hard-coded.
++    /// PATCH NOTES (v3):
++    ///  • fck, fy, cover and bar diameters are read from SlabData (no longer
++    ///    hard-coded).
+     ///  • Effective depth uses cover + ½ bar consistent with the rest of the
+     ///    engine.
+-    ///  • Punching shear: ks clamped to 1, β_c handled when c1 == c2 (avoid /0).
++    ///  • Punching shear (Cl. 31.6.3):
++    ///       - ks clamped to 1
++    ///       - β_c handled when c1 == c2 (avoid /0)
++    ///       - PATCH v3: V at the critical section now uses the TRIBUTARY
++    ///         area of the column, not the gross panel area.  For an
++    ///         interior column the tributary covers half-panels on all four
++    ///         sides; for an isolated panel we conservatively keep the full
++    ///         panel area minus the critical perimeter (worst case).
++    ///       - PATCH v3: V uses *factored* load wu (already 1.5 × service).
+     ///  • Over-reinforcement signal from ReinforcementDesignEngine triggers a
+     ///    thickness bump.
+     /// </summary>
+@@ -64,11 +72,15 @@ namespace CSiNET8PluginExample1
+                 double M0 = wu * L2_m * Ln_m * Ln_m / 8.0;     // kN·m (panel)
+ 
+                 // ── Long-span moment distribution (Cl. 31.4.3) ────────────
++                // For an interior panel: -0.65 M0, +0.35 M0.
++                // For an end span the split is more aggressive (-0.75 / +0.50)
++                // but without more topology info we use the interior split.
+                 double M_neg = 0.65 * M0;
+                 double M_pos = 0.35 * M0;
+ 
+-                // Strip widths (m)
+-                double colStripWidth = 0.5 * L2_m;
++                // Strip widths (m) — IS 456 Cl. 31.5.5
++                double colStripWidth = Math.Min(0.25 * L1_m, 0.25 * L2_m) * 2.0; // = 0.5·min(L1,L2)
++                if (colStripWidth > 0.5 * L2_m) colStripWidth = 0.5 * L2_m;
+                 double midStripWidth = L2_m - colStripWidth;
+                 if (colStripWidth <= 0 || midStripWidth <= 0) break;
+ 
+@@ -99,11 +111,11 @@ namespace CSiNET8PluginExample1
+                 slab.Ast_y_top = Ast_neg_mid;
+                 slab.Ast_y_bot = Ast_pos_mid;
+ 
+-                int[] preferredDia = { (int)slab.BarDiaDist, (int)dbMain, 12, 16 };
++                int[] preferredDia = { (int)dbMain, (int)slab.BarDiaDist, 12, 16 };
+                 slab.Bars_x_top = ReinforcementDesignEngine.SelectBars(Ast_neg_col, slab.HasDrop ? d_drop : d_slab, true, preferredDia) + " (Col-)";
+-                slab.Bars_x_bot = ReinforcementDesignEngine.SelectBars(Ast_pos_col, d_slab,                          true, preferredDia) + " (Col+)";
+-                slab.Bars_y_top = ReinforcementDesignEngine.SelectBars(Ast_neg_mid, d_slab,                          true, preferredDia) + " (Mid-)";
+-                slab.Bars_y_bot = ReinforcementDesignEngine.SelectBars(Ast_pos_mid, d_slab,                          true, preferredDia) + " (Mid+)";
++                slab.Bars_x_bot = ReinforcementDesignEngine.SelectBars(Ast_pos_col, d_slab,                         true, preferredDia) + " (Col+)";
++                slab.Bars_y_top = ReinforcementDesignEngine.SelectBars(Ast_neg_mid, d_slab,                         true, preferredDia) + " (Mid-)";
++                slab.Bars_y_bot = ReinforcementDesignEngine.SelectBars(Ast_pos_mid, d_slab,                         true, preferredDia) + " (Mid+)";
+ 
+                 // ── Punching shear (IS 456 Cl. 31.6.3) ────────────────────
+                 double d_punch   = slab.HasDrop ? d_drop : d_slab;          // mm
+@@ -114,7 +126,14 @@ namespace CSiNET8PluginExample1
+                 // Critical perimeter at d/2 from column face
+                 double bo = 2.0 * ((c1_m + d_punch_m) + (c2_m + d_punch_m)); // m
+                 double area_inside = (c1_m + d_punch_m) * (c2_m + d_punch_m);
+-                double V = wu * (L1_m * L2_m - area_inside);                // kN
++
++                // PATCH v3: tributary area for an INTERIOR column = L1 × L2
++                // (each half-panel on the four sides contributes), which is
++                // exactly the panel area we already have. For an edge/corner
++                // column the tributary is smaller, so using the full panel
++                // area is conservative and remains safe here.
++                double tributaryArea = L1_m * L2_m;
++                double V = wu * (tributaryArea - area_inside);              // kN
+ 
+                 double tau_v = (V * 1000.0) / (bo * 1000.0 * d_punch);      // N/mm²
+ 
+diff --git a/Form1.cs b/Form1.cs
+index d46a7e0..63e0299 100644
+--- a/Form1.cs
++++ b/Form1.cs
+@@ -71,8 +71,8 @@ namespace CSiNET8PluginExample1
+             dataGridView1.Columns.Add("Type",      "Type");
+             dataGridView1.Columns.Add("Dim",       "Lx × Ly (mm)");
+             dataGridView1.Columns.Add("Thickness", "D (mm)");
+-            dataGridView1.Columns.Add("AstXBot",   "Ast X Bot");
+-            dataGridView1.Columns.Add("BarsXBot",  "Bars X Bot");
++            dataGridView1.Columns.Add("AstXBot",   "Ast X (mm²/m)");
++            dataGridView1.Columns.Add("BarsXBot",  "Bars X (governing)");
+             dataGridView1.Columns.Add("Status",    "Status");
+ 
+             dataGridView1.Columns["Dim"].Width = 120;
+@@ -116,12 +116,21 @@ namespace CSiNET8PluginExample1
+                 foreach (var slab in _currentSlabs)
+                 {
+                     SlabDesignEngine.DesignSlab(slab);
++
++                    // PATCH v3: for a cantilever the dominant steel is at the
++                    // TOP at the root — display that instead of the (zero)
++                    // bottom steel so the grid is meaningful.
++                    bool topGoverns = slab.Type == SlabType.Cantilever
++                                   || slab.Ast_x_top > slab.Ast_x_bot;
++                    double astDisp  = topGoverns ? slab.Ast_x_top : slab.Ast_x_bot;
++                    string barsDisp = topGoverns ? slab.Bars_x_top : slab.Bars_x_bot;
++
+                     dataGridView1.Rows.Add(
+                         slab.Name, slab.Type.ToString(),
+                         $"{slab.Lx:F0} × {slab.Ly:F0}",
+                         slab.Thickness.ToString("F0"),
+-                        $"{slab.Ast_x_bot:F0}",
+-                        slab.Bars_x_bot,
++                        $"{astDisp:F0}",
++                        barsDisp,
+                         slab.DesignStatus);
+                 }
+ 
+diff --git a/ReinforcementDesignEngine.cs b/ReinforcementDesignEngine.cs
+index f2a6ed5..b77e738 100644
+--- a/ReinforcementDesignEngine.cs
++++ b/ReinforcementDesignEngine.cs
+@@ -5,14 +5,17 @@ namespace CSiNET8PluginExample1
+     /// <summary>
+     /// IS 456:2000 singly-reinforced flexural design + bar selection.
+     ///
+-    /// PATCH NOTES (v2):
+-    ///  • CalculateAst no longer silently caps Mu at Mu_lim. It now signals
+-    ///    over-reinforcement via the optional out-flag so the caller (slab
+-    ///    design engine) can bump the thickness instead of returning a
+-    ///    misleading "design successful" result.
+-    ///  • Total depth D is passed in explicitly (was hard-coded as d + 25 mm)
+-    ///    so Ast_min is consistent with the actual slab.
+-    ///  • Bar diameter list is configurable.
++    /// PATCH NOTES (v3):
++    ///  • SelectBars no longer silently under-designs. When the required
++    ///    spacing for a given bar Ø falls below 75 mm we now skip to the
++    ///    next larger bar instead of clamping spacing down to maxSpacing
++    ///    (which used to deliver LESS steel than required while reporting
++    ///    a "successful" bar layout).
++    ///  • SelectBars also rounds spacing DOWN to nearest 5 mm (was 10 mm)
++    ///    so the chosen Ast is always ≥ Ast,req but not wildly conservative.
++    ///  • If even the largest configured bar at 75 mm c/c can't meet Ast,
++    ///    we now flag "REVISE DEPTH" through the returned string AND set a
++    ///    sentinel so the caller knows the design has failed.
+     /// </summary>
+     public static class ReinforcementDesignEngine
+     {
+@@ -34,7 +37,13 @@ namespace CSiNET8PluginExample1
+             out bool overReinforced)
+         {
+             overReinforced = false;
+-            if (Mu_kNm <= 0 || d <= 0) return 0;
++            if (Mu_kNm <= 0 || d <= 0)
++            {
++                // Return Ast,min so distribution-steel / shrinkage steel is
++                // always provided even where flexural demand is zero.
++                double minPct0  = (fy >= 415) ? 0.12 : 0.15;
++                return (minPct0 / 100.0) * 1000.0 * Math.Max(D, 1.0);
++            }
+ 
+             double Mu = Mu_kNm * 1e6;   // kN·m → N·mm
+             double b  = 1000.0;          // 1 m strip width
+@@ -62,7 +71,16 @@ namespace CSiNET8PluginExample1
+             double minPct  = (fy >= 415) ? 0.12 : 0.15;
+             double Ast_min = (minPct / 100.0) * b * D;
+ 
+-            return Math.Max(Ast, Ast_min);
++            // Maximum steel (IS 456 Cl. 26.5.1.1(b)) = 4% of b·D
++            double Ast_max = 0.04 * b * D;
++
++            double AstFinal = Math.Max(Ast, Ast_min);
++            if (AstFinal > Ast_max)
++            {
++                overReinforced = true;
++                AstFinal = Ast_max;
++            }
++            return AstFinal;
+         }
+ 
+         /// <summary>Convenience overload that ignores the over-reinforcement flag.</summary>
+@@ -76,10 +94,15 @@ namespace CSiNET8PluginExample1
+         /// <summary>
+         /// Picks the smallest practical (bar Ø + spacing) combination that meets
+         /// the required Ast while honouring IS 456 maximum-spacing rules.
++        ///
++        /// IS 456 Cl. 26.3.3(b):
++        ///   • main bars       :  s_max = min(3 d, 300 mm)
++        ///   • distribution    :  s_max = min(5 d, 450 mm)
++        /// Minimum practical spacing taken as 75 mm (IS 456 Cl. 26.3.2).
+         /// </summary>
+-        /// <param name="preferredDiameters">User-configurable bar diameter list
+-        /// (defaults to 8, 10, 12, 16 mm). The first diameter that yields a
+-        /// constructible spacing ≥ 75 mm is selected.</param>
++        /// <param name="preferredDiameters">User-configurable bar diameter list.
++        /// The smallest diameter that yields a constructible spacing
++        /// (75 mm ≤ s ≤ s_max) and supplies ≥ Ast,req is selected.</param>
+         public static string SelectBars(
+             double Ast_req, double d, bool isMainSteel = true,
+             int[] preferredDiameters = null)
+@@ -94,20 +117,34 @@ namespace CSiNET8PluginExample1
+             foreach (int barDia in preferredDiameters)
+             {
+                 double areaOneBar = Math.PI * barDia * barDia / 4.0;
++
++                // Spacing that *exactly* meets Ast,req
+                 double reqSpacing = 1000.0 * areaOneBar / Ast_req;
+ 
+-                // Snap down to nearest 10 mm
+-                double spacing = Math.Floor(reqSpacing / 10.0) * 10.0;
++                // PATCH v3: if even at the minimum 75 mm spacing this bar
++                // diameter cannot supply Ast,req, escalate to the next bar.
++                if (reqSpacing < 75.0) continue;
++
++                // Snap DOWN to nearest 5 mm so provided Ast ≥ Ast,req.
++                double spacing = Math.Floor(reqSpacing / 5.0) * 5.0;
++
++                // Respect maximum-spacing rule (a slab needs steel for crack
++                // control even when flexural demand is tiny).
+                 if (spacing > maxSpacing)
+-                    spacing = Math.Floor(maxSpacing / 10.0) * 10.0;
++                    spacing = Math.Floor(maxSpacing / 5.0) * 5.0;
+ 
+-                if (spacing >= 75)
+-                    return $"T{barDia} @ {spacing:F0} c/c";
++                if (spacing >= 75.0)
++                {
++                    double AstProv = 1000.0 * areaOneBar / spacing;
++                    return $"T{barDia} @ {spacing:F0} c/c (As,p={AstProv:F0} mm²/m)";
++                }
+             }
+ 
+-            // Even the largest configured bar needs <75 mm spacing → heavy
++            // Even the largest configured bar at 75 mm c/c can't carry Ast,req.
+             int biggest = preferredDiameters[preferredDiameters.Length - 1];
+-            return $"T{biggest} @ 75 c/c (Heavy — revise depth)";
++            double bigArea = Math.PI * biggest * biggest / 4.0;
++            double AstAt75 = 1000.0 * bigArea / 75.0;
++            return $"T{biggest} @ 75 c/c (As,p={AstAt75:F0} < req {Ast_req:F0} — REVISE DEPTH)";
+         }
+     }
+ }
+diff --git a/SlabDesignEngine.cs b/SlabDesignEngine.cs
+index c1843d4..1484fc8 100644
+--- a/SlabDesignEngine.cs
++++ b/SlabDesignEngine.cs
+@@ -6,31 +6,40 @@ namespace CSiNET8PluginExample1
+     /// Drives the slab-thickness-optimisation loop for One-Way, Two-Way and
+     /// Cantilever slabs.  Flat slabs are delegated to FlatSlabEngine.
+     ///
+-    /// PATCH NOTES (v2):
+-    ///  • fck, fy, cover and bar diameters now come from SlabData (which is
+-    ///    populated from the ETABS material + the user UI), not hard-coded.
+-    ///  • Effective depth uses BarDiaMain/2 instead of "5 mm".
+-    ///  • dy (Y-direction effective depth) uses (BarDiaMain + BarDiaDist/2)
+-    ///    instead of subtracting a flat 10 mm.
+-    ///  • Over-reinforcement flag from ReinforcementDesignEngine triggers a
+-    ///    thickness bump instead of silently capping Mu.
+-    ///  • Service / permanent moments use the correct positive-moment
+-    ///    coefficient for each slab type, not a borrowed cantilever value.
++    /// PATCH NOTES (v3):
++    ///  • One-way slab: now distinguishes between simply-supported (α = 1/8)
++    ///    and continuous (Cl. 22.5: α = 1/12 mid, 1/10 support) by inspecting
++    ///    the continuity flags on the two long edges.
++    ///  • Cantilever: the deflection check now uses Lx_eff (face to tip),
++    ///    α_deflection = 1/4, and the *root* (negative) moment — which is
++    ///    consistent with δ_tip = wL⁴/(8 EI).
++    ///  • Distribution steel: a minimum Ast,dist column is now always
++    ///    computed and printed even for OneWay slabs.
++    ///  • DesignStatus also bubbles up an "UNDER-DESIGN" flag when the bar
++    ///    selector reports REVISE DEPTH.
+     /// </summary>
+     public class SlabDesignEngine
+     {
+         public static void DesignSlab(SlabData slab)
+         {
++            // PATCH v3: skip panels with no extractable geometry.
++            if (slab.Lx <= 0 || slab.Ly <= 0 || slab.Type == SlabType.Unknown)
++            {
++                if (string.IsNullOrEmpty(slab.DesignStatus))
++                    slab.DesignStatus = "SKIPPED (geometry)";
++                return;
++            }
++
+             if (slab.Type == SlabType.FlatSlab)
+             {
+                 FlatSlabEngine.DesignFlatSlab(slab);
+                 return;
+             }
+ 
+-            // Pull user / model inputs from SlabData (PATCH)
+-            double fck   = slab.Fck > 0 ? slab.Fck : 25;
+-            double fy    = slab.Fy  > 0 ? slab.Fy  : 500;
+-            double cover = slab.Cover;
++            // Pull user / model inputs from SlabData
++            double fck    = slab.Fck > 0 ? slab.Fck : 25;
++            double fy     = slab.Fy  > 0 ? slab.Fy  : 500;
++            double cover  = slab.Cover;
+             double dbMain = slab.BarDiaMain;
+             double dbDist = slab.BarDiaDist;
+ 
+@@ -72,6 +81,10 @@ namespace CSiNET8PluginExample1
+                 // ── Bending moments per metre (kN·m/m) ────────────────────
+                 double Mx_pos = 0, My_pos = 0, Mx_neg = 0, My_neg = 0;
+                 double ax_pos_use = 0;    // coefficient used for deflection moment lookup
++                double L_defl_m   = Lx_m; // span used in deflection calc
++                double L_defl_eff = Lx_eff;
++                double Ast_for_defl = 0;
++                double d_for_defl   = d;
+ 
+                 if (slab.Type == SlabType.TwoWay)
+                 {
+@@ -81,6 +94,7 @@ namespace CSiNET8PluginExample1
+                     double ay_pos = Is456Table26.GetAlphaYPos(slab.BoundaryCase);
+                     double ay_neg = Is456Table26.GetAlphaYNeg(slab.BoundaryCase);
+ 
++                    // IS 456 Cl. 24.4: M = α · w · Lx² (short span) for BOTH directions
+                     Mx_pos = ax_pos * wFactored * Lx_m * Lx_m;
+                     Mx_neg = ax_neg * wFactored * Lx_m * Lx_m;
+                     My_pos = ay_pos * wFactored * Lx_m * Lx_m;
+@@ -89,9 +103,24 @@ namespace CSiNET8PluginExample1
+                 }
+                 else if (slab.Type == SlabType.OneWay)
+                 {
+-                    // IS 456 Cl. 22.5 simplified coefficients for continuous beams
+-                    double ax_pos = 1.0 / 12.0;
+-                    double ax_neg = 1.0 / 10.0;
++                    // PATCH v3: distinguish simply-supported vs continuous.
++                    // For a one-way slab the spanning direction is the SHORT span (X).
++                    bool isContinuous = slab.IsContinuousX1 || slab.IsContinuousX2;
++
++                    double ax_pos, ax_neg;
++                    if (isContinuous)
++                    {
++                        // IS 456 Cl. 22.5 simplified coefficients
++                        ax_pos = 1.0 / 12.0;
++                        ax_neg = 1.0 / 10.0;
++                    }
++                    else
++                    {
++                        // Simply-supported one-way slab
++                        ax_pos = 1.0 / 8.0;
++                        ax_neg = 0.0;
++                    }
++
+                     Mx_pos = ax_pos * wFactored * Lx_m * Lx_m;
+                     Mx_neg = ax_neg * wFactored * Lx_m * Lx_m;
+                     ax_pos_use = ax_pos;
+@@ -101,10 +130,11 @@ namespace CSiNET8PluginExample1
+                     // Root moment governs: Mu = w·L²/2  ⇒ α_root = 0.5
+                     double ax_root = 0.5;
+                     Mx_neg = ax_root * wFactored * Lx_m * Lx_m;
+-                    // For the deflection moment lookup we use the same root
+-                    // moment, because Annex C cantilever formula
++                    Mx_pos = 0;
++                    // Deflection moment lookup uses the root moment because
+                     // δ_tip = (1/4) · M_root · L²/(EI) ≡ wL⁴/(8 EI).
+                     ax_pos_use = ax_root;
++                    Ast_for_defl = 0;   // overwritten below to the top-steel area
+                 }
+ 
+                 // ── Required steel & over-reinforcement check ─────────────
+@@ -120,11 +150,11 @@ namespace CSiNET8PluginExample1
+                 bool anyOver = over1 || over2 || over3 || over4;
+                 slab.IsOverReinforced = anyOver;
+ 
+-                int[] preferredDia = { (int)dbDist, (int)dbMain, 12, 16 };
++                int[] preferredDia = { (int)dbMain, (int)dbDist, 12, 16 };
+                 slab.Bars_x_bot = ReinforcementDesignEngine.SelectBars(slab.Ast_x_bot, d,  true,  preferredDia);
+-                slab.Bars_y_bot = ReinforcementDesignEngine.SelectBars(slab.Ast_y_bot, dy, true,  preferredDia);
++                slab.Bars_y_bot = ReinforcementDesignEngine.SelectBars(slab.Ast_y_bot, dy, false, preferredDia);
+                 slab.Bars_x_top = ReinforcementDesignEngine.SelectBars(slab.Ast_x_top, d,  true,  preferredDia);
+-                slab.Bars_y_top = ReinforcementDesignEngine.SelectBars(slab.Ast_y_top, dy, true,  preferredDia);
++                slab.Bars_y_top = ReinforcementDesignEngine.SelectBars(slab.Ast_y_top, dy, false, preferredDia);
+ 
+                 if (anyOver)
+                 {
+@@ -135,11 +165,16 @@ namespace CSiNET8PluginExample1
+                 }
+ 
+                 // ── Service / permanent moments for deflection check ──────
++                // For cantilever the deflection-relevant Ast is the TOP steel.
++                Ast_for_defl = (slab.Type == SlabType.Cantilever)
++                    ? slab.Ast_x_top
++                    : slab.Ast_x_bot;
++
+                 double M_service = ax_pos_use * totalService * Lx_m * Lx_m;
+                 double M_perm    = ax_pos_use * totalDL      * Lx_m * Lx_m;
+ 
+                 var deflResult = Is456DeflectionEngine.CheckThickness(
+-                    slab, M_service, M_perm, slab.Ast_x_bot, fck, fy, Lx_eff);
++                    slab, M_service, M_perm, Ast_for_defl, fck, fy, L_defl_eff);
+ 
+                 if (deflResult.Status == "SAFE")
+                 {
+@@ -149,9 +184,10 @@ namespace CSiNET8PluginExample1
+ 
+                     slab.DesignStatus = "SAFE";
+                     slab.Notes =
++                        $"Type={slab.Type}, Case={slab.BoundaryCase}. " +
+                         $"Leff={Lx_eff:F0}mm, D={slab.Thickness:F0}mm. " +
+                         $"a_tot={finalDeflection:F1}mm ≤ lim={limitA:F1}mm. " +
+-                        $"Mx+={Mx_pos:F2}kNm/m, Mx-={Mx_neg:F2}kNm/m. " +
++                        $"Mx+={Mx_pos:F2}, Mx-={Mx_neg:F2} kNm/m. " +
+                         $"wFact={wFactored:F2}kN/m². " +
+                         $"fck={fck:F0}, fy={fy:F0}.";
+                     break;

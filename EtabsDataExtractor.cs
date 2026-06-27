@@ -109,10 +109,35 @@ namespace CSiNET8PluginExample1
                     slab.Lx = Math.Min(d12, d23) * 1000; // → mm
                     slab.Ly = Math.Max(d12, d23) * 1000; // → mm
                 }
+                else if (numPoints >= 3 && pointNames != null)
+                {
+                    // PATCH v3: non-quadrilateral panel — use bounding-box of
+                    // all vertices so the geometry is at least representative.
+                    double minX=double.MaxValue, maxX=double.MinValue;
+                    double minY=double.MaxValue, maxY=double.MinValue;
+                    for (int i = 0; i < numPoints; i++)
+                    {
+                        double xp=0, yp=0, zp=0;
+                        _sapModel.PointObj.GetCoordCartesian(pointNames[i], ref xp, ref yp, ref zp);
+                        minX = Math.Min(minX, xp); maxX = Math.Max(maxX, xp);
+                        minY = Math.Min(minY, yp); maxY = Math.Max(maxY, yp);
+                    }
+                    double bx = (maxX - minX) * lenToM * 1000.0;
+                    double by = (maxY - minY) * lenToM * 1000.0;
+                    slab.Lx = Math.Min(bx, by);
+                    slab.Ly = Math.Max(bx, by);
+                    slab.Type = SlabType.Unknown;       // flag for review
+                }
                 else
                 {
-                    slab.Lx = 4000;
-                    slab.Ly = 4000;
+                    // PATCH v3: do NOT silently substitute 4 m × 4 m. Flag for
+                    // user attention instead — designing with fake geometry
+                    // gives misleading results.
+                    slab.Lx = 0; slab.Ly = 0;
+                    slab.Type = SlabType.Unknown;
+                    slab.DesignStatus = "SKIPPED (geometry not extractable)";
+                    slab.Notes = $"Panel has {numPoints} vertices — could not extract a usable Lx/Ly. " +
+                                 "Inspect the area object in ETABS.";
                 }
 
                 // ── Thickness & material (from the assigned section property) ──
@@ -197,7 +222,7 @@ namespace CSiNET8PluginExample1
                 slab.SuperimposedDeadLoad = sdl;
 
                 // ── Preliminary type classification by Ly/Lx ──────────────
-                if (slab.Lx > 0 && slab.Ly > 0)
+                if (slab.Lx > 0 && slab.Ly > 0 && slab.Type != SlabType.Unknown)
                     slab.Type = slab.Ly / slab.Lx > 2.0 ? SlabType.OneWay : SlabType.TwoWay;
 
                 slabs.Add(slab);

@@ -71,8 +71,8 @@ namespace CSiNET8PluginExample1
             dataGridView1.Columns.Add("Type",      "Type");
             dataGridView1.Columns.Add("Dim",       "Lx × Ly (mm)");
             dataGridView1.Columns.Add("Thickness", "D (mm)");
-            dataGridView1.Columns.Add("AstXBot",   "Ast X Bot");
-            dataGridView1.Columns.Add("BarsXBot",  "Bars X Bot");
+            dataGridView1.Columns.Add("AstXBot",   "Ast X (mm²/m)");
+            dataGridView1.Columns.Add("BarsXBot",  "Bars X (governing)");
             dataGridView1.Columns.Add("Status",    "Status");
 
             dataGridView1.Columns["Dim"].Width = 120;
@@ -116,12 +116,21 @@ namespace CSiNET8PluginExample1
                 foreach (var slab in _currentSlabs)
                 {
                     SlabDesignEngine.DesignSlab(slab);
+
+                    // PATCH v3: for a cantilever the dominant steel is at the
+                    // TOP at the root — display that instead of the (zero)
+                    // bottom steel so the grid is meaningful.
+                    bool topGoverns = slab.Type == SlabType.Cantilever
+                                   || slab.Ast_x_top > slab.Ast_x_bot;
+                    double astDisp  = topGoverns ? slab.Ast_x_top : slab.Ast_x_bot;
+                    string barsDisp = topGoverns ? slab.Bars_x_top : slab.Bars_x_bot;
+
                     dataGridView1.Rows.Add(
                         slab.Name, slab.Type.ToString(),
                         $"{slab.Lx:F0} × {slab.Ly:F0}",
                         slab.Thickness.ToString("F0"),
-                        $"{slab.Ast_x_bot:F0}",
-                        slab.Bars_x_bot,
+                        $"{astDisp:F0}",
+                        barsDisp,
                         slab.DesignStatus);
                 }
 
