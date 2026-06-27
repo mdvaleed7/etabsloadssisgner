@@ -6,32 +6,50 @@ namespace CSiNET8PluginExample1
     {
         public static void DesignSlab(SlabData slab)
         {
-            // ── Loads ────────────────────────────────────────────────────────────
-            // CORRECTION (SlabDesignEngine.cs): the previous version omitted slab
-            // self-weight from wFactored.  IS 875 Part 1 / IS 456 Cl. 18.2 require
-            // self-weight to be included in DL.  Self-weight = (D/1000) × 25 kN/m².
-            double selfWeight  = (slab.Thickness / 1000.0) * 25.0; // kN/m²
-            double totalDL     = selfWeight + slab.DeadLoad + slab.SuperimposedDeadLoad;
+
+            double selfWeight = (slab.Thickness / 1000.0) * 25.0; // kN/m2
+            double totalDL = selfWeight + slab.DeadLoad + slab.SuperimposedDeadLoad;
             double totalService = totalDL + slab.LiveLoad;
 
             // IS 875 Part 5 / IS 456 Cl. 18.2: ULS combination = 1.5(DL + LL)
             double wFactored = totalService * 1.5;
 
-            // ── IS 456 Table 26 moment coefficients (simplified: fixed interior panel) ──
-            // BoundaryCase 1 (all edges continuous): αx+ = 0.024, αx- = 0.032, etc.
-            // For a proper implementation these should be looked up from Table 26 by
-            // Ly/Lx ratio and boundary case number — see slabEngine.ts for the full table.
-            double ax_pos, ay_pos, ax_neg, ay_neg;
-            // Interior panel (Case 1) at Ly/Lx = 1.0
-            ax_pos = 0.024; ay_pos = 0.024;
-            ax_neg = 0.032; ay_neg = 0.032;
-
+            // ── Bending moments ──────────────────────────────────────────────────
+            double Mx_pos = 0, My_pos = 0, Mx_neg = 0, My_neg = 0;
+            double ax_pos = 0, ay_pos = 0;
+            
             double Lx_m = slab.Lx / 1000.0; // mm → m
 
-            double Mx_pos = ax_pos * wFactored * Lx_m * Lx_m;
-            double My_pos = ay_pos * wFactored * Lx_m * Lx_m;
-            double Mx_neg = ax_neg * wFactored * Lx_m * Lx_m;
-            double My_neg = ay_neg * wFactored * Lx_m * Lx_m;
+            if (slab.Type == SlabType.TwoWay)
+            {
+                double lyLx = slab.Ly / slab.Lx;
+                ax_pos = Is456Table26.GetAlphaXPos(slab.BoundaryCase, lyLx);
+                double ax_neg = Is456Table26.GetAlphaXNeg(slab.BoundaryCase, lyLx);
+                ay_pos = Is456Table26.GetAlphaYPos(slab.BoundaryCase);
+                double ay_neg = Is456Table26.GetAlphaYNeg(slab.BoundaryCase);
+
+                Mx_pos = ax_pos * wFactored * Lx_m * Lx_m;
+                Mx_neg = ax_neg * wFactored * Lx_m * Lx_m;
+                My_pos = ay_pos * wFactored * Lx_m * Lx_m;
+                My_neg = ay_neg * wFactored * Lx_m * Lx_m;
+            }
+            else if (slab.Type == SlabType.OneWay)
+            {
+                // Simplified one-way coefficients (assuming continuous interior)
+                ax_pos = 1.0 / 12.0; 
+                double ax_neg = 1.0 / 10.0;
+                Mx_pos = ax_pos * wFactored * Lx_m * Lx_m;
+                Mx_neg = ax_neg * wFactored * Lx_m * Lx_m;
+            }
+            else if (slab.Type == SlabType.Cantilever)
+            {
+                // Cantilever moment wL^2 / 2
+                double ax_neg = 0.5;
+                Mx_neg = ax_neg * wFactored * Lx_m * Lx_m;
+                ax_pos = 0.5; // for deflection service moment lookup parity
+            }
+
+            // Moments calculated above
 
             double maxMu = Math.Max(Mx_pos, Math.Max(My_pos, Math.Max(Mx_neg, My_neg)));
 
