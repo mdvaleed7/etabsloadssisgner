@@ -64,6 +64,17 @@ namespace CSiNET8PluginExample1
         public string Bars_x_top { get; set; } = "";
         public string Bars_y_top { get; set; } = "";
 
+        // Effective Span Edge Properties
+        public double SupportWidthX1 { get; set; } = 0; // mm
+        public double SupportWidthX2 { get; set; } = 0; // mm
+        public double SupportWidthY1 { get; set; } = 0; // mm
+        public double SupportWidthY2 { get; set; } = 0; // mm
+
+        public bool IsContinuousX1 { get; set; } = false;
+        public bool IsContinuousX2 { get; set; } = false;
+        public bool IsContinuousY1 { get; set; } = false;
+        public bool IsContinuousY2 { get; set; } = false;
+
         // Flat Slab specific properties
         public double c1 { get; set; } = 400; // Column dimension (mm)
         public double c2 { get; set; } = 400; // Column dimension (mm)

@@ -96,7 +96,7 @@ namespace CSiNET8PluginExample1
             int numFrames = 0;
             string[] frameNames = null;
             _sapModel.FrameObj.GetNameList(ref numFrames, ref frameNames);
-            var beamEdges = new HashSet<Edge>();
+            var beamEdges = new Dictionary<Edge, double>();
             
             if (numFrames > 0 && frameNames != null)
             {
@@ -111,10 +111,19 @@ namespace CSiNET8PluginExample1
                     // Only consider horizontal frames as beams
                     if (Math.Abs(z1 - z2) < 0.1)
                     {
-                        beamEdges.Add(new Edge(
+                        string propName = "", sAuto = "";
+                        _sapModel.FrameObj.GetSection(fname, ref propName, ref sAuto);
+                        
+                        string fileName="", matProp="", notes="", guid="";
+                        double t3=0, t2=0; int color=0;
+                        int ret = _sapModel.PropFrame.GetRectangle(propName, ref fileName, ref matProp, ref t3, ref t2, ref color, ref notes, ref guid);
+                        double width = ret == 0 ? (t2 * _lenToM * 1000.0) : 230.0; // default 230mm if not rectangular
+
+                        var edge = new Edge(
                             new Point3D(x1 * _lenToM, y1 * _lenToM, z1 * _lenToM),
                             new Point3D(x2 * _lenToM, y2 * _lenToM, z2 * _lenToM)
-                        ));
+                        );
+                        beamEdges[edge] = width;
                     }
                 }
             }
@@ -133,8 +142,20 @@ namespace CSiNET8PluginExample1
                     int shortDisc = shortEdges.Count(e => edgeToSlabs[e].Count == 1);
                     int longDisc = longEdges.Count(e => edgeToSlabs[e].Count == 1);
                     
+                    // Edges bounding Lx (short span) have length Ly (long edges).
+                    slab.SupportWidthX1 = beamEdges.ContainsKey(longEdges[0]) ? beamEdges[longEdges[0]] : 0;
+                    slab.SupportWidthX2 = beamEdges.ContainsKey(longEdges[1]) ? beamEdges[longEdges[1]] : 0;
+                    slab.IsContinuousX1 = edgeToSlabs[longEdges[0]].Count > 1;
+                    slab.IsContinuousX2 = edgeToSlabs[longEdges[1]].Count > 1;
+
+                    // Edges bounding Ly (long span) have length Lx (short edges).
+                    slab.SupportWidthY1 = beamEdges.ContainsKey(shortEdges[0]) ? beamEdges[shortEdges[0]] : 0;
+                    slab.SupportWidthY2 = beamEdges.ContainsKey(shortEdges[1]) ? beamEdges[shortEdges[1]] : 0;
+                    slab.IsContinuousY1 = edgeToSlabs[shortEdges[0]].Count > 1;
+                    slab.IsContinuousY2 = edgeToSlabs[shortEdges[1]].Count > 1;
+
                     // Beam check for Flat Slab
-                    int edgesWithBeams = edges.Count(e => beamEdges.Contains(e));
+                    int edgesWithBeams = edges.Count(e => beamEdges.ContainsKey(e));
                     if (edgesWithBeams == 0 && edgeToSlabs.Values.Any(list => list.Count > 1))
                     {
                         slab.Type = SlabType.FlatSlab;
