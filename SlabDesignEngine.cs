@@ -62,12 +62,36 @@ namespace CSiNET8PluginExample1
             double fck  = 25;   // M25
             double fy   = 500;  // Fe500
 
-            // Preliminary Ast (approximate lever arm = 0.85d — iterative refinement
-            // would use the full IS 456 Cl. 38.1 parabolic formula; acceptable here
-            // as a seed value for the deflection loop).
-            double d_initial = slab.Thickness - 20 - 5; // cover 20 mm + bar radius 5 mm
-            double leverArm  = 0.85 * d_initial;         // ≈ 0.85d (Fe500 balanced section)
-            double Ast_req   = (maxMu * 1e6) / (0.87 * fy * leverArm); // mm²
+            double cover = 20;
+            double dx = slab.Thickness - cover - 5; // Assumed 10mm main bar
+            double dy = dx - 10;                    // Y layer sits above X layer
+
+            // Calculate Required Ast (mm2/m)
+            slab.Ast_x_bot = ReinforcementDesignEngine.CalculateAst(Mx_pos, dx, fck, fy);
+            slab.Ast_y_bot = ReinforcementDesignEngine.CalculateAst(My_pos, dy, fck, fy);
+            slab.Ast_x_top = ReinforcementDesignEngine.CalculateAst(Mx_neg, dx, fck, fy);
+            slab.Ast_y_top = ReinforcementDesignEngine.CalculateAst(My_neg, dy, fck, fy);
+
+            // Select Bars
+            slab.Bars_x_bot = ReinforcementDesignEngine.SelectBars(slab.Ast_x_bot, dx, true);
+            slab.Bars_y_bot = ReinforcementDesignEngine.SelectBars(slab.Ast_y_bot, dy, true);
+            slab.Bars_x_top = ReinforcementDesignEngine.SelectBars(slab.Ast_x_top, dx, true);
+            slab.Bars_y_top = ReinforcementDesignEngine.SelectBars(slab.Ast_y_top, dy, true);
+
+            // Limit state check
+            double pt = 0.3; // Approx starting percentage
+            double Mu_limit = 0.133 * fck * 1000 * dx * dx / 1e6; // kNm
+
+            if (maxMu <= Mu_limit)
+            {
+                slab.DesignStatus = "SAFE";
+                slab.Notes = $"SW={selfWeight:F2} kN/m2, wFact={wFactored:F2} kN/m2. Flexure Safe.";
+            }
+            else
+            {
+                slab.DesignStatus = "FAIL (Flexure)";
+                slab.Notes = $"Mu ({maxMu:F2} kNm) > Mu_lim ({Mu_limit:F2} kNm). Increase thickness.";
+            }
 
             // Service moment (total) and permanent moment (DL only)
             double M_service = ax_pos * totalService * Lx_m * Lx_m;
@@ -75,7 +99,7 @@ namespace CSiNET8PluginExample1
 
             // ── Iterative deflection optimisation (IS 456 Annex C) ──────────────
             var deflResult = Is456DeflectionEngine.CheckAndOptimizeThickness(
-                slab, M_service, M_perm, Ast_req, fck, fy);
+                slab, M_service, M_perm, slab.Ast_x_bot, fck, fy);
 
             if (deflResult.Status == "SAFE")
             {

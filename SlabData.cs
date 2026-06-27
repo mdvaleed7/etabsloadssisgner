@@ -47,8 +47,21 @@ namespace CSiNET8PluginExample1
         // instead of passing an empty string to SetSlab().
         public string MaterialName { get; set; } = "";
 
-        // Design Results
-        public string DesignStatus { get; set; }
-        public string Notes { get; set; }
+        // Design outputs
+        public double DeflectionRatio { get; set; } = 0;
+        public string DesignStatus { get; set; } = "";
+        public string Notes { get; set; } = "";
+
+        // Reinforcement outputs (Ast in mm2/m)
+        public double Ast_x_bot { get; set; } = 0;
+        public double Ast_y_bot { get; set; } = 0;
+        public double Ast_x_top { get; set; } = 0;
+        public double Ast_y_top { get; set; } = 0;
+
+        // Final Bar Selection Strings (e.g., "T10 @ 150 c/c")
+        public string Bars_x_bot { get; set; } = "";
+        public string Bars_y_bot { get; set; } = "";
+        public string Bars_x_top { get; set; } = "";
+        public string Bars_y_top { get; set; } = "";
     }
 }

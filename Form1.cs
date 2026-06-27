@@ -26,6 +26,8 @@ namespace CSiNET8PluginExample1
             dataGridView1.Columns.Add("Type", "Type");
             dataGridView1.Columns.Add("Dimensions", "Lx x Ly (mm)");
             dataGridView1.Columns.Add("Thickness", "Thickness (mm)");
+            dataGridView1.Columns.Add("AstXBot", "Ast X Bot");
+            dataGridView1.Columns.Add("BarsXBot", "Bars X Bot");
             dataGridView1.Columns.Add("Status", "Design Status");
             
             dataGridView1.Columns["Dimensions"].Width = 120;
@@ -73,6 +75,8 @@ namespace CSiNET8PluginExample1
                         slab.Type.ToString(),
                         $"{slab.Lx:F0} x {slab.Ly:F0}",
                         slab.Thickness.ToString(),
+                        $"{slab.Ast_x_bot:F0}",
+                        slab.Bars_x_bot,
                         slab.DesignStatus
                     );
                 }
@@ -114,8 +118,11 @@ namespace CSiNET8PluginExample1
                     }
                     else
                     {
-                        lblDeflection.Text = "Deflection details not found";
+                        lblDeflection.Text = "Deflection: " + slab.Notes;
                     }
+                    
+                    // Show all bar selections in the notes string or we can just append it to lblDeflection for now
+                    lblDeflection.Text += $"\nBot: X={slab.Bars_x_bot}, Y={slab.Bars_y_bot} | Top: X={slab.Bars_x_top}, Y={slab.Bars_y_top}";
                     
                     btnPushToEtabs.Enabled = true;
                     btnPushToEtabs.Tag = slab; // Store the slab object in the button for easy access
