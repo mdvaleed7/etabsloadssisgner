@@ -11,21 +11,28 @@ namespace CSiNET8PluginExample1
     public class cPlugin : cPluginContract
     {
         private static string _modality = "Non-Modal";
-        private static string _versionString = "2.0";
+        private static string _versionString = "1.0";
         private int errorCode = 0; // default return code is no error
 
         public int Info(ref string Text)
         {
             try
             {
-                Text = "This plugin is supplied by Computers and Structures, Inc., " +
-                       "as a simple example for developers of new plugins for CSI products. " +
-                       "It starts a new blank model, then converts a line of text into " +
-                       "frame objects and adds them to the model. It trivially uses the popular " +
-                       "Newtonsoft.Json library to demonstrate proper dependency management. " +
-                       "If you enter the " +
-                       "text \"crash\", an error will be generated for testing purposes. " +
-                       "Version " + _versionString;
+                // CORRECTION (cplugin.cs): replaced CSI boilerplate with an accurate
+                // description of this plugin's actual purpose and capabilities.
+                Text = "IS 456 Slab Design Plugin v" + _versionString + Environment.NewLine +
+                       "Developed by: Advatech Structural Engineers" + Environment.NewLine +
+                       Environment.NewLine +
+                       "Extracts all area (slab) objects from the open ETABS model, " +
+                       "performs IS 456:2000 flexural design and deflection optimisation " +
+                       "(Annex C), and writes the optimised slab thickness back to " +
+                       "ETABS as a new shell-section property." + Environment.NewLine +
+                       Environment.NewLine +
+                       "Supported slab types: One-Way, Two-Way (Table 26), " +
+                       "Cantilever, Flat Slab." + Environment.NewLine +
+                       "Deflection check: IS 456 Annex C (short-term + shrinkage + creep)." +
+                       Environment.NewLine +
+                       "Load combinations: IS 875 Part 5 (1.5 DL+LL).";
             }
             catch (Exception)
             {
@@ -91,4 +98,3 @@ namespace CSiNET8PluginExample1
         }
     }
 }
-
