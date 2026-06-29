@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>EtabsWindAutomation</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <NoWarn>$(NoWarn);CS8600;CS8601;CS8602;CS8603;CS8604;CS8618;CS8622;CS8625;CS8765;CS0168;CS0219</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="ETABSv1.Wind.cs" />
+    <Compile Include="../../src/EtabsWindAutomation/Models.cs" />
+    <Compile Include="../../src/EtabsWindAutomation/EtabsApi.cs" />
+    <Compile Include="../../src/EtabsWindAutomation/Is875WindCalculator.cs" />
+    <Compile Include="../../src/EtabsWindAutomation/SettingsLoader.cs" />
+    <Compile Include="../../src/EtabsWindAutomation/EtabsModelExtractor.cs" />
+    <Compile Include="../../src/EtabsWindAutomation/EtabsLoadApplier.cs" />
+    <Compile Include="../../src/EtabsWindAutomation/WindPluginRunner.cs" />
+  </ItemGroup>
+</Project>
