@@ -6,7 +6,7 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RootNamespace>CSiNET8PluginExample1</RootNamespace>
+    <RootNamespace>AdvatechEtabsPlugin</RootNamespace>
     <AssemblyName>AdvatechEtabsPlugin</AssemblyName>
 
     <!-- PATCH: ETABS 22 is 64-bit only. Building AnyCPU and dropping the DLL
