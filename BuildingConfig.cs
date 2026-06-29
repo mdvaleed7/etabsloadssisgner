@@ -96,13 +96,18 @@ namespace CSiNET8PluginExample1
         public string PatternDead    { get; set; } = "DEAD";
         public string PatternSDL     { get; set; } = "SDL";
         public string PatternLive    { get; set; } = "LIVE";
-        public string PatternEQX     { get; set; } = "EQX";
-        public string PatternEQY     { get; set; } = "EQY";
         public string PatternWLX     { get; set; } = "WLX";
         public string PatternWLY     { get; set; } = "WLY";
         public string RSFunctionName { get; set; } = "IS1893_2016_Spectrum";
-        public string CaseEQX        { get; set; } = "EQX";
-        public string CaseEQY        { get; set; } = "EQY";
+
+        // ── Response-spectrum load-case names ────────────────────────────────
+        // IMPORTANT: ETABS requires every load case to have a unique name. The
+        // seismic effect is delivered ENTIRELY by these Response Spectrum cases,
+        // so we deliberately do NOT create static Quake-type load patterns named
+        // "EQX"/"EQY" (which would collide with these case names and serve no
+        // analytical purpose). Combinations reference CaseEQX / CaseEQY below.
+        public string CaseEQX        { get; set; } = "EQX_RS";
+        public string CaseEQY        { get; set; } = "EQY_RS";
         public string CaseModal      { get; set; } = "Modal";
 
         // ── Derived properties ────────────────────────────────────────────────

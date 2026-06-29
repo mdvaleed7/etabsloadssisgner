@@ -96,8 +96,9 @@ namespace CSiNET8PluginExample1
 
         private void OnOccChanged()
         {
-            double[] llLookup = { 2.0, 4.0, 4.0, 4.0, 5.0, 7.5, 12.0, 4.0, 4.0 };
-            if (cbOcc.SelectedIndex < llLookup.Length)
+            // Index 8 = "Custom": leave the user's live-load value untouched.
+            double[] llLookup = { 2.0, 4.0, 4.0, 4.0, 5.0, 7.5, 12.0, 4.0 };
+            if (cbOcc.SelectedIndex >= 0 && cbOcc.SelectedIndex < llLookup.Length)
                 txtLL.Text = llLookup[cbOcc.SelectedIndex].ToString("F1");
         }
 
@@ -153,89 +154,121 @@ namespace CSiNET8PluginExample1
                 RoofLiveLoad   = roofLL,
                 CladdingLoad_kNm = clad,
                 ParapetLoad_kNm  = par,
-                // Pattern names from the bottom row of the Config tab
+                // Pattern names from the bottom row of the Config tab.
                 PatternDead    = string.IsNullOrWhiteSpace(txtPDead.Text) ? "DEAD" : txtPDead.Text.Trim(),
                 PatternSDL     = string.IsNullOrWhiteSpace(txtPSDL.Text)  ? "SDL"  : txtPSDL.Text.Trim(),
                 PatternLive    = string.IsNullOrWhiteSpace(txtPLive.Text) ? "LIVE" : txtPLive.Text.Trim(),
-                PatternEQX     = string.IsNullOrWhiteSpace(txtPEQX.Text)  ? "EQX"  : txtPEQX.Text.Trim(),
-                PatternEQY     = string.IsNullOrWhiteSpace(txtPEQY.Text)  ? "EQY"  : txtPEQY.Text.Trim(),
-                CaseEQX        = string.IsNullOrWhiteSpace(txtPEQX.Text)  ? "EQX"  : txtPEQX.Text.Trim(),
-                CaseEQY        = string.IsNullOrWhiteSpace(txtPEQY.Text)  ? "EQY"  : txtPEQY.Text.Trim(),
+                // The EQX/EQY text boxes name the Response Spectrum load CASES.
+                // (No static Quake patterns are created — they would collide with
+                //  these case names. See BuildingConfig / LoadPatternCreator notes.)
+                CaseEQX        = string.IsNullOrWhiteSpace(txtPEQX.Text)  ? "EQX_RS" : txtPEQX.Text.Trim(),
+                CaseEQY        = string.IsNullOrWhiteSpace(txtPEQY.Text)  ? "EQY_RS" : txtPEQY.Text.Trim(),
             };
         }
 
-        // ── Load Setup steps ──────────────────────────────────────────────────
-        private void RunStep1()
+        // ── Input validation ──────────────────────────────────────────────────
+        /// <summary>
+        /// Validates the form inputs. Returns true if OK; otherwise reports the
+        /// first problem so the workflow does not push garbage into ETABS.
+        /// </summary>
+        private bool ValidateInputs()
         {
-            if (_sapModel == null) { LogError("Not connected to ETABS"); return; }
-            mainTabs.SelectedTab = tabLoads;
-            try
+            string err = null;
+
+            if (!double.TryParse(txtR.Text, out double r) || r <= 0)
+                err = "R factor must be a positive number.";
+            else if (!double.TryParse(txtDamp.Text, out double d) || d <= 0 || d > 30)
+                err = "Damping ratio (%) must be between 0 and 30.";
+            else if (!int.TryParse(txtModes.Text, out int m) || m < 1)
+                err = "Number of modes must be a positive integer.";
+            else if (!double.TryParse(txtLL.Text, out double ll) || ll < 0)
+                err = "Floor live load must be a non-negative number.";
+            else if (!double.TryParse(txtSDL.Text, out double sdl) || sdl < 0)
+                err = "SDL must be a non-negative number.";
+            else if (!double.TryParse(txtRoofLL.Text, out double rll) || rll < 0)
+                err = "Roof live load must be a non-negative number.";
+            else if (!double.TryParse(txtCladding.Text, out double cl) || cl < 0)
+                err = "Cladding load must be a non-negative number.";
+            else if (!double.TryParse(txtParapet.Text, out double pp) || pp < 0)
+                err = "Parapet load must be a non-negative number.";
+
+            if (err != null)
             {
-                var cfg = BuildConfig();
-                Log("\n" + _patCreator.CreateAllPatterns(cfg));
+                LogError("Input validation: " + err);
+                MessageBox.Show(err, "Invalid input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
             }
-            catch (Exception ex) { LogError($"Step 1 failed: {ex.Message}"); }
+            return true;
         }
 
-        private void RunStep2()
+        /// <summary>
+        /// Common guard + busy-state wrapper for every load step: connection check,
+        /// input validation, tab switch, wait cursor, and button enable/disable.
+        /// </summary>
+        private void RunGuarded(string title, Action<BuildingConfig> work)
         {
-            if (_sapModel == null) { LogError("Not connected to ETABS"); return; }
-            mainTabs.SelectedTab = tabLoads;
-            try
-            {
-                var cfg = BuildConfig();
-                Log("\n" + _caseCreator.CreateAllCases(cfg));
-            }
-            catch (Exception ex) { LogError($"Step 2 failed: {ex.Message}"); }
-        }
+            if (_sapModel == null) { LogError("Not connected to ETABS."); return; }
+            if (!ValidateInputs()) return;
 
-        private void RunStep3()
-        {
-            if (_sapModel == null) { LogError("Not connected to ETABS"); return; }
             mainTabs.SelectedTab = tabLoads;
+            SetBusy(true);
             try
             {
                 var cfg = BuildConfig();
-                Log("\n" + _assigner.AssignAllLoads(cfg));
-            }
-            catch (Exception ex) { LogError($"Step 3 failed: {ex.Message}"); }
-        }
-
-        private void RunStep4()
-        {
-            if (_sapModel == null) { LogError("Not connected to ETABS"); return; }
-            mainTabs.SelectedTab = tabLoads;
-            try
-            {
-                var cfg = BuildConfig();
-                Log("\n" + _comboCreator.CreateAllCombinations(cfg));
-            }
-            catch (Exception ex) { LogError($"Step 4 failed: {ex.Message}"); }
-        }
-
-        private void RunAllSteps()
-        {
-            if (_sapModel == null) { LogError("Not connected to ETABS"); return; }
-            mainTabs.SelectedTab = tabLoads;
-            Log("\n══════════════════════════════════════════");
-            Log($"  IS 875 + IS 1893:2016 Load Automation");
-            Log($"  {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-            Log("══════════════════════════════════════════");
-            try
-            {
-                var cfg = BuildConfig();
-                Log("\n" + _patCreator.CreateAllPatterns(cfg));
-                Log("\n" + _caseCreator.CreateAllCases(cfg));
-                Log("\n" + _assigner.AssignAllLoads(cfg));
-                Log("\n" + _comboCreator.CreateAllCombinations(cfg));
-                Log("\n✔  All steps complete. Refresh ETABS view and verify.");
-                Log("   IMPORTANT: Set Mass Source (Define > Mass Source) for seismic weight.");
-                Log("   Apply IS 875 Part 3 wind pressures to WLX/WLY cases manually.");
+                work(cfg);
             }
             catch (Exception ex)
             {
-                LogError($"Run failed: {ex.Message}\n{ex.StackTrace}");
+                LogError($"{title} failed: {ex.Message}");
             }
+            finally
+            {
+                SetBusy(false);
+            }
+        }
+
+        private void SetBusy(bool busy)
+        {
+            UseWaitCursor = busy;
+            grpSteps.Enabled = !busy;
+            Application.DoEvents(); // keep the UI responsive during long API runs
+        }
+
+        // ── Load Setup steps ────────────────────────────────────────────────────
+        private void RunStep1() =>
+            RunGuarded("Create Load Patterns",
+                cfg => Log("\n" + _patCreator.CreateAllPatterns(cfg)));
+
+        private void RunStep2() =>
+            RunGuarded("Create Load Cases",
+                cfg => Log("\n" + _caseCreator.CreateAllCases(cfg)));
+
+        private void RunStep3() =>
+            RunGuarded("Assign Gravity Loads",
+                cfg => Log("\n" + _assigner.AssignAllLoads(cfg)));
+
+        private void RunStep4() =>
+            RunGuarded("Create Load Combinations",
+                cfg => Log("\n" + _comboCreator.CreateAllCombinations(cfg)));
+
+        private void RunAllSteps()
+        {
+            RunGuarded("Run All", cfg =>
+            {
+                Log("\n==========================================");
+                Log("  IS 875 + IS 1893:2016 Load Automation");
+                Log($"  {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                Log("==========================================");
+
+                Log("\n" + _patCreator.CreateAllPatterns(cfg));
+                Log("\n" + _caseCreator.CreateAllCases(cfg));
+                Log("\n" + _assigner.AssignAllLoads(cfg));
+                Log("\n" + _comboCreator.CreateAllCombinations(cfg));
+
+                Log("\n[DONE] All steps complete. Refresh the ETABS view and verify.");
+                Log("   - A seismic mass source was set automatically (verify Define > Mass Source).");
+                Log("   - Apply IS 875 Part 3 wind pressures via the Wind Automation tab.");
+            });
         }
 
         private void NormalizeExistingUiText()

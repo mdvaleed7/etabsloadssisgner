@@ -173,15 +173,15 @@ namespace CSiNET8PluginExample1
 
             // ── Pattern names group ───────────────────────────────────────────
             cy += 210;
-            grpPatNames = MakeGroup("Load Pattern Names (edit if model already uses different names)", cx, cy, GRP_W+220, 100);
+            grpPatNames = MakeGroup("Load Pattern / Case Names (edit if model already uses different names)", cx, cy, GRP_W+320, 100);
             tabConfig.Controls.Add(grpPatNames);
             gy = 22;
             int pw = 80;
             lblPDead = MakeLbl("Dead:", gx, gy); txtPDead = MakeTxt("DEAD", gx+50, gy, pw);
             lblPSDL  = MakeLbl("SDL:", gx+145, gy); txtPSDL  = MakeTxt("SDL", gx+195, gy, pw);
             lblPLive = MakeLbl("Live:", gx+285, gy); txtPLive = MakeTxt("LIVE", gx+325, gy, pw);
-            lblPEQX  = MakeLbl("EQX:", gx+420, gy); txtPEQX  = MakeTxt("EQX", gx+460, gy, pw);
-            lblPEQY  = MakeLbl("EQY:", gx+555, gy); txtPEQY  = MakeTxt("EQY", gx+595, gy, pw);
+            lblPEQX  = MakeLbl("EQX case:", gx+400, gy); txtPEQX  = MakeTxt("EQX_RS", gx+470, gy, pw);
+            lblPEQY  = MakeLbl("EQY case:", gx+560, gy); txtPEQY  = MakeTxt("EQY_RS", gx+630, gy, pw);
             grpPatNames.Controls.AddRange(new System.Windows.Forms.Control[]{
                 lblPDead, txtPDead, lblPSDL, txtPSDL, lblPLive, txtPLive,
                 lblPEQX, txtPEQX, lblPEQY, txtPEQY });

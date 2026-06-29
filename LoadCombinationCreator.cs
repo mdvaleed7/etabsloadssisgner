@@ -60,12 +60,20 @@ namespace CSiNET8PluginExample1
             _sapModel = sapModel;
         }
 
+        // Cached snapshot of existing combination names for this run, so we make
+        // one GetNameList call instead of one per ComboExists() check.
+        private HashSet<string> _existingCombos;
+
         public string CreateAllCombinations(BuildingConfig cfg)
         {
             var log = new System.Text.StringBuilder();
-            log.AppendLine("═══ Creating Load Combinations ═══");
+            log.AppendLine("=== Creating Load Combinations ===");
 
-            int nBefore = CountCombos();
+            // Combinations are definitions — the model must be unlocked first.
+            EtabsModelGuard.EnsureUnlocked(_sapModel, log);
+
+            _existingCombos = GetExistingCombos();
+            int nBefore = _existingCombos.Count;
 
             // ── ULS: Gravity ─────────────────────────────────────────────────
             AddLinear("IS875_G1_ULS", log, cfg,
@@ -94,15 +102,27 @@ namespace CSiNET8PluginExample1
                 (cfg.PatternDead, 1.2), (cfg.PatternSDL, 1.2),
                 (cfg.PatternLive, 1.2), (cfg.CaseEQY,   -1.2));
 
-            // Overturning / uplift combinations (0.9 DL ± 1.5 EQ)
-            AddLinear("IS875_S5_09DL+EQX", log, cfg,
-                (cfg.PatternDead, 0.9), (cfg.CaseEQX, +1.5));
-            AddLinear("IS875_S6_09DL-EQX", log, cfg,
-                (cfg.PatternDead, 0.9), (cfg.CaseEQX, -1.5));
-            AddLinear("IS875_S7_09DL+EQY", log, cfg,
-                (cfg.PatternDead, 0.9), (cfg.CaseEQY, +1.5));
-            AddLinear("IS875_S8_09DL-EQY", log, cfg,
-                (cfg.PatternDead, 0.9), (cfg.CaseEQY, -1.5));
+            // IS 1893:2016 Cl. 6.3.4.2(b): 1.5(DL + EQ) — seismic with no live load.
+            // SDL is permanent dead load and is included at the same 1.5 factor.
+            AddLinear("IS1893_S1b_15DLEQX+", log, cfg,
+                (cfg.PatternDead, 1.5), (cfg.PatternSDL, 1.5), (cfg.CaseEQX, +1.5));
+            AddLinear("IS1893_S1b_15DLEQX-", log, cfg,
+                (cfg.PatternDead, 1.5), (cfg.PatternSDL, 1.5), (cfg.CaseEQX, -1.5));
+            AddLinear("IS1893_S1b_15DLEQY+", log, cfg,
+                (cfg.PatternDead, 1.5), (cfg.PatternSDL, 1.5), (cfg.CaseEQY, +1.5));
+            AddLinear("IS1893_S1b_15DLEQY-", log, cfg,
+                (cfg.PatternDead, 1.5), (cfg.PatternSDL, 1.5), (cfg.CaseEQY, -1.5));
+
+            // IS 1893:2016 Cl. 6.3.4.2(c): 0.9 DL ± 1.5 EQ — minimum gravity /
+            // overturning / uplift check. SDL is permanent dead and factored 0.9.
+            AddLinear("IS1893_S5_09DL+EQX", log, cfg,
+                (cfg.PatternDead, 0.9), (cfg.PatternSDL, 0.9), (cfg.CaseEQX, +1.5));
+            AddLinear("IS1893_S6_09DL-EQX", log, cfg,
+                (cfg.PatternDead, 0.9), (cfg.PatternSDL, 0.9), (cfg.CaseEQX, -1.5));
+            AddLinear("IS1893_S7_09DL+EQY", log, cfg,
+                (cfg.PatternDead, 0.9), (cfg.PatternSDL, 0.9), (cfg.CaseEQY, +1.5));
+            AddLinear("IS1893_S8_09DL-EQY", log, cfg,
+                (cfg.PatternDead, 0.9), (cfg.PatternSDL, 0.9), (cfg.CaseEQY, -1.5));
 
             // ── ULS: Wind ─────────────────────────────────────────────────────
             AddLinear("IS875_W1_WLX+", log, cfg,
@@ -119,13 +139,13 @@ namespace CSiNET8PluginExample1
                 (cfg.PatternLive, 1.2), (cfg.PatternWLY, -1.2));
 
             AddLinear("IS875_W5_09DL+WLX", log, cfg,
-                (cfg.PatternDead, 0.9), (cfg.PatternWLX, +1.5));
+                (cfg.PatternDead, 0.9), (cfg.PatternSDL, 0.9), (cfg.PatternWLX, +1.5));
             AddLinear("IS875_W6_09DL-WLX", log, cfg,
-                (cfg.PatternDead, 0.9), (cfg.PatternWLX, -1.5));
+                (cfg.PatternDead, 0.9), (cfg.PatternSDL, 0.9), (cfg.PatternWLX, -1.5));
             AddLinear("IS875_W7_09DL+WLY", log, cfg,
-                (cfg.PatternDead, 0.9), (cfg.PatternWLY, +1.5));
+                (cfg.PatternDead, 0.9), (cfg.PatternSDL, 0.9), (cfg.PatternWLY, +1.5));
             AddLinear("IS875_W8_09DL-WLY", log, cfg,
-                (cfg.PatternDead, 0.9), (cfg.PatternWLY, -1.5));
+                (cfg.PatternDead, 0.9), (cfg.PatternSDL, 0.9), (cfg.PatternWLY, -1.5));
 
             // ── SLS: Serviceability (IS 456 Cl. 23.2) ────────────────────────
             // Unfactored combinations for deflection and crack width checks.
@@ -144,7 +164,8 @@ namespace CSiNET8PluginExample1
             CreateEnvelope("ENV_ULS", log,
                 "IS875_G1_ULS", "IS875_G2_ULS_NoLL",
                 "IS875_S1_EQX+", "IS875_S2_EQX-", "IS875_S3_EQY+", "IS875_S4_EQY-",
-                "IS875_S5_09DL+EQX", "IS875_S6_09DL-EQX", "IS875_S7_09DL+EQY", "IS875_S8_09DL-EQY",
+                "IS1893_S1b_15DLEQX+", "IS1893_S1b_15DLEQX-", "IS1893_S1b_15DLEQY+", "IS1893_S1b_15DLEQY-",
+                "IS1893_S5_09DL+EQX", "IS1893_S6_09DL-EQX", "IS1893_S7_09DL+EQY", "IS1893_S8_09DL-EQY",
                 "IS875_W1_WLX+", "IS875_W2_WLX-", "IS875_W3_WLY+", "IS875_W4_WLY-",
                 "IS875_W5_09DL+WLX", "IS875_W6_09DL-WLX", "IS875_W7_09DL+WLY", "IS875_W8_09DL-WLY");
 
@@ -158,13 +179,22 @@ namespace CSiNET8PluginExample1
             return log.ToString();
         }
 
+        private HashSet<string> GetExistingCombos()
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int n = 0; string[] names = null;
+            if (_sapModel.RespCombo.GetNameList(ref n, ref names) == 0 && names != null)
+                foreach (var c in names) set.Add(c);
+            return set;
+        }
+
         // ── Helper: create one Linear Add combination ─────────────────────────
         // Cases can be either load patterns (eCNameType.LoadCase for auto-generated
         // static cases) or RS load cases (same type). ETABS identifies them by name.
         private void AddLinear(string comboName, System.Text.StringBuilder log,
                                BuildingConfig cfg, params (string name, double sf)[] cases)
         {
-            // Skip if already exists
+            // Skip if already exists (idempotent re-runs).
             if (ComboExists(comboName)) { log.AppendLine($"  SKIP  {comboName}"); return; }
 
             int ret = _sapModel.RespCombo.Add(comboName, 0); // 0 = Linear Add
@@ -175,11 +205,26 @@ namespace CSiNET8PluginExample1
             {
                 eCNameType ct = eCNameType.LoadCase;
                 int r2 = _sapModel.RespCombo.SetCaseList(comboName, ref ct, name, sf);
-                if (r2 != 0) { allOk = false; log.AppendLine($"  WARN  {comboName}: case '{name}' (ret={r2})"); }
+                if (r2 != 0)
+                {
+                    allOk = false;
+                    log.AppendLine($"  WARN  {comboName}: case '{name}' not added (ret={r2}) — " +
+                                   "is the case/pattern defined? (run the relevant step first)");
+                }
             }
 
             if (allOk)
+            {
+                _existingCombos.Add(comboName);
                 log.AppendLine($"  OK    {comboName}  [{string.Join("  ", Array.ConvertAll(cases, c => $"{(c.sf >= 0 ? "+" : "")}{c.sf:F1}×{c.name}"))}]");
+            }
+            else
+            {
+                // Roll back a partially-populated combo so the model is not left
+                // with a meaningless empty/partial combination.
+                _sapModel.RespCombo.Delete(comboName);
+                log.AppendLine($"  FAIL  {comboName} removed (one or more referenced cases missing)");
+            }
         }
 
         // ── Helper: create an Envelope combination ────────────────────────────
@@ -188,19 +233,31 @@ namespace CSiNET8PluginExample1
         {
             if (ComboExists(comboName)) { log.AppendLine($"  SKIP  {comboName}"); return; }
 
+            // Only include sub-combinations that were actually created. Referencing a
+            // missing combo would fail and leave a degenerate envelope.
+            var present = Array.FindAll(subCombos, ComboExists);
+            if (present.Length == 0)
+            {
+                log.AppendLine($"  SKIP  {comboName} (no sub-combinations available to envelope)");
+                return;
+            }
+
             int ret = _sapModel.RespCombo.Add(comboName, 1); // 1 = Envelope
             if (ret != 0) { log.AppendLine($"  FAIL  {comboName} Envelope (ret={ret})"); return; }
 
-            foreach (string sub in subCombos)
+            int added = 0;
+            foreach (string sub in present)
             {
                 eCNameType ct = eCNameType.LoadCombo;
-                _sapModel.RespCombo.SetCaseList(comboName, ref ct, sub, 1.0);
+                if (_sapModel.RespCombo.SetCaseList(comboName, ref ct, sub, 1.0) == 0) added++;
             }
-            log.AppendLine($"  OK    {comboName} (envelope of {subCombos.Length} combos)");
+            _existingCombos.Add(comboName);
+            log.AppendLine($"  OK    {comboName} (envelope of {added} combo(s))");
         }
 
         private bool ComboExists(string name)
         {
+            if (_existingCombos != null) return _existingCombos.Contains(name);
             int n = 0; string[] names = null;
             _sapModel.RespCombo.GetNameList(ref n, ref names);
             return names != null &&

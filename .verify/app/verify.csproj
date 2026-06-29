@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CSiNET8PluginExample1</RootNamespace>
+    <NoWarn>$(NoWarn);CS8600;CS8601;CS8602;CS8603;CS8604;CS8618;CS8622;CS8625;CS8765;CS0168;CS0219</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../stub/ETABSv1.cs" />
+    <Compile Include="../../BuildingConfig.cs" />
+    <Compile Include="../../SeismicHelper.cs" />
+    <Compile Include="../../EtabsModelGuard.cs" />
+    <Compile Include="../../LoadPatternCreator.cs" />
+    <Compile Include="../../LoadCaseCreator.cs" />
+    <Compile Include="../../LoadAssigner.cs" />
+    <Compile Include="../../LoadCombinationCreator.cs" />
+  </ItemGroup>
+</Project>

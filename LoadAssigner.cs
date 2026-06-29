@@ -5,45 +5,41 @@ using ETABSv1;
 namespace CSiNET8PluginExample1
 {
     /// <summary>
-    /// Assigns gravity loads to all area and frame objects in the ETABS model.
+    /// Assigns gravity loads to area (slab) and frame (beam) objects.
     ///
     /// Strategy
-    /// ────────
-    /// 1. Identify stories: the topmost story receives ROOF loads (RoofLL, Parapet).
-    ///    All other stories receive FLOOR loads (LL, SDL, Cladding).
-    ///
+    /// --------
+    /// 1. The top-most story receives ROOF loads (RoofLL, Parapet); all lower
+    ///    stories receive FLOOR loads (LL, SDL, Cladding).
     /// 2. Area objects (slabs):
-    ///    • SDL assigned uniformly to all slab area objects.
-    ///    • LL  assigned uniformly to floor slabs; RoofLL to roof slabs.
-    ///    • Self-weight is handled by the DEAD load pattern's SW multiplier = 1.0.
+    ///    • SDL applied uniformly to every slab.
+    ///    • LL  applied uniformly (floor LL on floors, roof LL on the roof slab).
+    ///    • Self-weight is carried by the DEAD pattern (SW multiplier = 1.0).
+    /// 3. Frame objects (beams):
+    ///    • Cladding line load on EXTERIOR floor beams (perimeter detection).
+    ///    • Parapet line load on roof-level exterior beams.
+    ///    • Columns are skipped (members predominantly vertical).
     ///
-    /// 3. Frame objects (beams / columns):
-    ///    • Cladding/façade line load applied to EXTERIOR beams only.
-    ///      Exterior beams are identified as frame objects whose mid-point lies
-    ///      on or near the plan bounding box perimeter (within a tolerance of 0.2 m).
-    ///    • Parapet line load applied to roof-level exterior beams.
-    ///    • Interior beams and all columns receive NO additional loads here;
-    ///      their self-weight is captured by the DEAD pattern (SW mult = 1.0).
+    /// Direction convention: MyDir = 10 (Gravity) so the load acts downward in the
+    /// global -Z sense regardless of the active coordinate system. Using a POSITIVE
+    /// magnitude with the "Gravity" direction is the unambiguous, units-safe way to
+    /// apply downward loads in ETABS (avoids the "negative value + Global Z" trap,
+    /// which flips sign if someone applies it in a rotated local system).
     ///
-    /// ETABS API direction convention used throughout:
-    ///   SetLoadUniform  — MyDir = 6 (Global Z), Value = -load (downward = -Z)
-    ///   SetLoadDistributed — MyDir = 6 (Global Z), Val = -load (downward)
-    ///   The Global Z axis in ETABS points upward; downward loads require negative values.
-    ///
-    /// IS code references
-    /// ──────────────────
-    ///   SDL:       IS 875 Part 1 (unit weights, superimposed finishes)
-    ///   LL:        IS 875 Part 2 (imposed loads on floors/roofs)
-    ///   Cladding:  IS 875 Part 1 (façade self-weight as line load on beams)
-    ///   Parapet:   IS 875 Part 1
+    /// Idempotency: gravity loads use Replace=true keyed by (object, pattern), so
+    /// re-running the step does NOT accumulate duplicate loads.
     /// </summary>
     public class LoadAssigner
     {
         private readonly cSapModel _sapModel;
 
-        // Tolerance (metres) for perimeter beam detection:
-        // a beam mid-point within this distance of the plan bounding box is "exterior".
-        private const double PERIMETER_TOL = 0.30; // m
+        // ETABS load direction codes: 6 = Global Z, 10 = Gravity (downward).
+        private const int DIR_GRAVITY = 10;
+        private const int MYTYPE_FORCE = 1;
+
+        // Tolerance (metres) for perimeter beam detection and roof-elevation match.
+        private const double PERIMETER_TOL_M = 0.30;
+        private const double ELEV_TOL_M = 0.10;
 
         public LoadAssigner(cSapModel sapModel)
         {
@@ -53,22 +49,36 @@ namespace CSiNET8PluginExample1
         public string AssignAllLoads(BuildingConfig cfg)
         {
             var log = new System.Text.StringBuilder();
-            log.AppendLine("═══ Assigning Loads ═══");
+            log.AppendLine("=== Assigning Loads ===");
 
-            // Identify roof story (highest elevation)
-            double roofElev = 0;
-            string roofStory = GetRoofStory(log, out roofElev);
+            EtabsModelGuard.EnsureUnlocked(_sapModel, log);
 
-            // Assign loads to area objects (slabs)
-            AssignSlabLoads(cfg, roofStory, roofElev, log);
+            // Length scale: model-units-per-metre, used to convert tolerances.
+            double unitsPerMetre = GetLengthUnitsPerMetre();
+            double perimTol = PERIMETER_TOL_M * unitsPerMetre;
+            double elevTol  = ELEV_TOL_M * unitsPerMetre;
 
-            // Assign loads to frame objects (beams): cladding on exterior beams
-            AssignBeamLoads(cfg, roofStory, roofElev, log);
+            string roofStory = GetRoofStory(log, out double roofElev);
 
+            AssignSlabLoads(cfg, roofElev, elevTol, log);
+            AssignBeamLoads(cfg, roofElev, perimTol, elevTol, log);
+
+            log.AppendLine("  NOTE  Loads applied in the model's PRESENT units. Verify Define > Units.");
             return log.ToString();
         }
 
-        // ── Identify the top-most story ───────────────────────────────────────
+        // -- Length conversion: how many model length units equal one metre -----
+        private double GetLengthUnitsPerMetre()
+        {
+            string u = _sapModel.GetPresentUnits().ToString();
+            if (u.Contains("_mm_")) return 1000.0;
+            if (u.Contains("_cm_")) return 100.0;
+            if (u.Contains("_in_")) return 39.3701;
+            if (u.Contains("_ft_")) return 3.28084;
+            return 1.0; // metres
+        }
+
+        // -- Identify the top-most story ----------------------------------------
         private string GetRoofStory(System.Text.StringBuilder log, out double maxElev)
         {
             maxElev = 0;
@@ -86,25 +96,26 @@ namespace CSiNET8PluginExample1
                 ref storyHt, ref isMaster, ref simTo,
                 ref spliceAbove, ref spliceHt);
 
-            if (ret != 0 || nStories == 0 || storyNames == null)
+            if (ret != 0 || nStories == 0 || storyNames == null || storyElev == null)
             {
-                log.AppendLine("  WARN  Could not read story list — roof detection skipped");
+                log.AppendLine("  WARN  Could not read story list — roof detection skipped " +
+                               "(all areas treated as floors)");
+                maxElev = double.NaN;
                 return "";
             }
 
-            // Find the story with the maximum elevation
             int topIdx = 0;
             maxElev = storyElev[0];
             for (int i = 1; i < nStories; i++)
                 if (storyElev[i] > maxElev) { maxElev = storyElev[i]; topIdx = i; }
 
             string roofStory = storyNames[topIdx];
-            log.AppendLine($"  INFO  Roof story identified: '{roofStory}' at elev {maxElev:F2} m");
+            log.AppendLine($"  INFO  Roof story: '{roofStory}' at elevation {maxElev:F3} (model units)");
             return roofStory;
         }
 
-        // ── Slab / Area object loads ──────────────────────────────────────────
-        private void AssignSlabLoads(BuildingConfig cfg, string roofStory, double roofElev,
+        // -- Slab / Area object loads -------------------------------------------
+        private void AssignSlabLoads(BuildingConfig cfg, double roofElev, double elevTol,
                                      System.Text.StringBuilder log)
         {
             int nAreas = 0;
@@ -112,53 +123,58 @@ namespace CSiNET8PluginExample1
             int ret = _sapModel.AreaObj.GetNameList(ref nAreas, ref areaNames);
             if (ret != 0 || nAreas == 0 || areaNames == null)
             {
-                log.AppendLine("  FAIL  No area objects found");
+                log.AppendLine("  WARN  No area objects found — slab load assignment skipped");
                 return;
             }
 
-            int floorSDL = 0, floorLL = 0, roofLL = 0, skipped = 0;
+            int floorSDL = 0, floorLL = 0, roofLL = 0, failSDL = 0, failLL = 0;
 
             foreach (string aName in areaNames)
             {
-                // Determine which story this area belongs to
-                int numPoints = 0;
-                string[] pointNames = null;
-                _sapModel.AreaObj.GetPoints(aName, ref numPoints, ref pointNames);
-                double z = 0;
-                if (numPoints > 0 && pointNames != null)
-                {
-                    double ptX = 0, ptY = 0;
-                    _sapModel.PointObj.GetCoordCartesian(pointNames[0], ref ptX, ref ptY, ref z);
-                }
+                double z = GetAreaCentroidZ(aName);
+                bool isRoof = !double.IsNaN(roofElev) && Math.Abs(z - roofElev) <= elevTol;
 
-                bool isRoof = Math.Abs(z - roofElev) < 0.1;
-
-                // SDL: same for floor and roof (finishes, waterproofing etc.)
-                // IS 875 Part 1: finishes 0.5–1.5 kN/m², waterproofing ~1.0 kN/m²
-                // Direction 6 = Global Z; negative value = downward
+                // SDL (finishes, waterproofing). Replace=true => idempotent per pattern.
                 int r1 = _sapModel.AreaObj.SetLoadUniform(
-                    aName, cfg.PatternSDL, -cfg.SDL, 6, true, "Global", eItemType.Objects);
-                if (r1 == 0) floorSDL++;
+                    aName, cfg.PatternSDL, cfg.SDL, DIR_GRAVITY, true, "Global", eItemType.Objects);
+                if (r1 == 0) floorSDL++; else failSDL++;
 
-                // LL: floor LL or roof LL depending on story
+                // LL (floor or roof).
                 double ll = isRoof ? cfg.RoofLiveLoad : cfg.LiveLoad;
-                string pat = cfg.PatternLive;
                 int r2 = _sapModel.AreaObj.SetLoadUniform(
-                    aName, pat, -ll, 6, true, "Global", eItemType.Objects);
-                if (r2 == 0)
-                { if (isRoof) roofLL++; else floorLL++; }
-                else skipped++;
+                    aName, cfg.PatternLive, ll, DIR_GRAVITY, true, "Global", eItemType.Objects);
+                if (r2 == 0) { if (isRoof) roofLL++; else floorLL++; } else failLL++;
             }
 
             log.AppendLine($"  OK    SDL={cfg.SDL} kN/m² → {floorSDL} areas");
             log.AppendLine($"  OK    Floor LL={cfg.LiveLoad} kN/m² → {floorLL} areas");
             log.AppendLine($"  OK    Roof LL={cfg.RoofLiveLoad} kN/m² → {roofLL} areas");
-            if (skipped > 0) log.AppendLine($"  WARN  {skipped} area assignments failed — check model");
+            if (failSDL > 0) log.AppendLine($"  WARN  {failSDL} SDL assignment(s) failed");
+            if (failLL > 0)  log.AppendLine($"  WARN  {failLL} LL assignment(s) failed");
         }
 
-        // ── Beam / Frame object loads: cladding on exterior beams ─────────────
-        private void AssignBeamLoads(BuildingConfig cfg, string roofStory, double roofElev,
-                                     System.Text.StringBuilder log)
+        // Average Z of an area's corner points (more robust than a single corner).
+        private double GetAreaCentroidZ(string areaName)
+        {
+            int numPoints = 0;
+            string[] pointNames = null;
+            if (_sapModel.AreaObj.GetPoints(areaName, ref numPoints, ref pointNames) != 0
+                || pointNames == null || numPoints == 0)
+                return double.NaN;
+
+            double sumZ = 0; int count = 0;
+            foreach (var p in pointNames)
+            {
+                double x = 0, y = 0, z = 0;
+                if (_sapModel.PointObj.GetCoordCartesian(p, ref x, ref y, ref z) == 0)
+                { sumZ += z; count++; }
+            }
+            return count > 0 ? sumZ / count : double.NaN;
+        }
+
+        // -- Beam / Frame object loads: cladding on exterior beams --------------
+        private void AssignBeamLoads(BuildingConfig cfg, double roofElev, double perimTol,
+                                     double elevTol, System.Text.StringBuilder log)
         {
             int nFrames = 0;
             string[] frameNames = null;
@@ -169,108 +185,92 @@ namespace CSiNET8PluginExample1
                 return;
             }
 
-            // Compute plan bounding box (X-Y) of all frame mid-points
+            // Single pass: read each frame's end coordinates ONCE and cache them.
+            // (The previous implementation queried coordinates twice per frame.)
+            var beams = new List<BeamGeom>(nFrames);
             double xMin = double.MaxValue, xMax = double.MinValue;
             double yMin = double.MaxValue, yMax = double.MinValue;
-
-            var midpoints = new Dictionary<string, (double x, double y, double z, string story)>();
 
             foreach (string fName in frameNames)
             {
                 string pt1 = "", pt2 = "";
-                _sapModel.FrameObj.GetPoints(fName, ref pt1, ref pt2);
+                if (_sapModel.FrameObj.GetPoints(fName, ref pt1, ref pt2) != 0) continue;
 
-                double x1=0, y1=0, z1=0, x2=0, y2=0, z2=0;
-                _sapModel.PointObj.GetCoordCartesian(pt1, ref x1, ref y1, ref z1);
-                _sapModel.PointObj.GetCoordCartesian(pt2, ref x2, ref y2, ref z2);
+                double x1 = 0, y1 = 0, z1 = 0, x2 = 0, y2 = 0, z2 = 0;
+                if (_sapModel.PointObj.GetCoordCartesian(pt1, ref x1, ref y1, ref z1) != 0) continue;
+                if (_sapModel.PointObj.GetCoordCartesian(pt2, ref x2, ref y2, ref z2) != 0) continue;
 
-                double mx = (x1 + x2) / 2.0;
-                double my = (y1 + y2) / 2.0;
-                double mz = (z1 + z2) / 2.0;
+                double dz = Math.Abs(z2 - z1);
+                double dxy = Math.Sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+                bool isColumn = dz > dxy; // predominantly vertical => column
 
-                midpoints[fName] = (mx, my, mz, "");
+                var g = new BeamGeom
+                {
+                    Name = fName,
+                    MidX = (x1 + x2) / 2.0,
+                    MidY = (y1 + y2) / 2.0,
+                    MidZ = (z1 + z2) / 2.0,
+                    IsColumn = isColumn
+                };
+                beams.Add(g);
 
-                if (mx < xMin) xMin = mx; if (mx > xMax) xMax = mx;
-                if (my < yMin) yMin = my; if (my > yMax) yMax = my;
+                if (!isColumn)
+                {
+                    if (g.MidX < xMin) xMin = g.MidX;
+                    if (g.MidX > xMax) xMax = g.MidX;
+                    if (g.MidY < yMin) yMin = g.MidY;
+                    if (g.MidY > yMax) yMax = g.MidY;
+                }
             }
 
-            // Unit conversion: bounding box is in model units → need to apply
-            // PERIMETER_TOL in the same units. Query and convert:
-            eUnits u = _sapModel.GetPresentUnits();
-            string uName = u.ToString();
-            double tolModelUnits = PERIMETER_TOL; // default for m model
-            if (uName.Contains("_mm_"))  tolModelUnits = PERIMETER_TOL * 1000.0;
-            else if (uName.Contains("_in_")) tolModelUnits = PERIMETER_TOL * 39.37;
-            else if (uName.Contains("_ft_")) tolModelUnits = PERIMETER_TOL * 3.281;
+            int nCladding = 0, nParapet = 0, nFail = 0;
 
-            int nCladding = 0, nParapet = 0, nSkip = 0;
-
-            foreach (var kvp in midpoints)
+            foreach (var g in beams)
             {
-                string fName = kvp.Key;
-                var (mx, my, mz, _) = kvp.Value;
+                if (g.IsColumn) continue;
 
-                // Skip vertical members (columns): their length is predominantly in Z.
-                // Heuristic: if |Δz| > max(|Δx|, |Δy|) → column → skip.
-                string pt1="", pt2="";
-                _sapModel.FrameObj.GetPoints(fName, ref pt1, ref pt2);
-                double x1=0,y1=0,z1=0,x2=0,y2=0,z2=0;
-                _sapModel.PointObj.GetCoordCartesian(pt1, ref x1, ref y1, ref z1);
-                _sapModel.PointObj.GetCoordCartesian(pt2, ref x2, ref y2, ref z2);
-                double dz = Math.Abs(z2 - z1);
-                double dxy = Math.Sqrt((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1));
-                if (dz > dxy) continue; // skip columns
-
-                // Check if beam mid-point is on the perimeter
-                bool onPerim = (mx <= xMin + tolModelUnits) || (mx >= xMax - tolModelUnits) ||
-                               (my <= yMin + tolModelUnits) || (my >= yMax - tolModelUnits);
+                bool onPerim = (g.MidX <= xMin + perimTol) || (g.MidX >= xMax - perimTol) ||
+                               (g.MidY <= yMin + perimTol) || (g.MidY >= yMax - perimTol);
                 if (!onPerim) continue;
 
-                bool isRoof = Math.Abs(mz - roofElev) < 0.1;
+                bool isRoof = !double.IsNaN(roofElev) && Math.Abs(g.MidZ - roofElev) <= elevTol;
 
-                if (isRoof)
-                {
-                    // Parapet load on roof perimeter beams (kN/m)
-                    // IS 875 Part 1: masonry parapet ~2–4 kN/m
-                    int r = ApplyBeamLineLoad(fName, cfg.PatternSDL, cfg.ParapetLoad_kNm);
-                    if (r == 0) nParapet++; else nSkip++;
-                }
-                else
-                {
-                    // Cladding load on exterior floor beams (kN/m)
-                    // IS 875 Part 1: typical glass/ACP cladding 0.5–1.5 kN/m²×storey ht
-                    int r = ApplyBeamLineLoad(fName, cfg.PatternSDL, cfg.CladdingLoad_kNm);
-                    if (r == 0) nCladding++; else nSkip++;
-                }
+                double load = isRoof ? cfg.ParapetLoad_kNm : cfg.CladdingLoad_kNm;
+                int r = ApplyBeamLineLoad(g.Name, cfg.PatternSDL, load);
+                if (r == 0) { if (isRoof) nParapet++; else nCladding++; } else nFail++;
             }
 
-            log.AppendLine($"  OK    Cladding {cfg.CladdingLoad_kNm} kN/m → {nCladding} perimeter beams");
+            log.AppendLine($"  OK    Cladding {cfg.CladdingLoad_kNm} kN/m → {nCladding} perimeter floor beams");
             log.AppendLine($"  OK    Parapet  {cfg.ParapetLoad_kNm} kN/m → {nParapet} roof perimeter beams");
-            if (nSkip > 0) log.AppendLine($"  WARN  {nSkip} beam assignments failed");
+            if (nFail > 0) log.AppendLine($"  WARN  {nFail} beam assignment(s) failed");
         }
 
         /// <summary>
-        /// Applies a uniform distributed line load (kN/m) to a single frame object.
-        /// Direction 6 (Global Z), negative value = downward gravity.
+        /// Applies a uniform distributed gravity line load (kN/m) to a frame.
+        /// MyType=1 (force), Dir=10 (Gravity, downward), full span, Replace=true so
+        /// the SDL cladding/parapet contribution is idempotent on re-run.
         /// </summary>
         private int ApplyBeamLineLoad(string frameName, string patternName, double load_kNm)
         {
-            // SetLoadDistributed: MyType=1 (force), Dir=6 (Global Z)
-            // Dist1=0, Dist2=1 (full span), Val1=Val2=-load (uniform)
-            // RelDist=true (relative distances 0.0–1.0)
-            // Replace=false (add to existing; SDL may have multiple contributions)
             return _sapModel.FrameObj.SetLoadDistributed(
                 frameName, patternName,
-                1,       // MyType: 1=force, 2=moment
-                6,       // Dir: global Z
-                0.0,     // Dist1 (start, relative)
-                1.0,     // Dist2 (end, relative)
-                -load_kNm, // Val1: negative = downward
-                -load_kNm, // Val2: negative = downward
+                MYTYPE_FORCE,
+                DIR_GRAVITY,
+                0.0,          // Dist1 (start, relative)
+                1.0,          // Dist2 (end, relative)
+                load_kNm,     // Val1 (Gravity direction => downward, positive magnitude)
+                load_kNm,     // Val2
                 "Global",
-                true,    // relative distances
-                false,   // do not replace existing loads on this frame
-                eItemType.Objects);  // by object
+                RelDist: true,
+                Replace: true,  // idempotent: replaces this pattern's load on the frame
+                ItemType: eItemType.Objects);
+        }
+
+        private struct BeamGeom
+        {
+            public string Name;
+            public double MidX, MidY, MidZ;
+            public bool IsColumn;
         }
     }
 }

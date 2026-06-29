@@ -5,25 +5,21 @@ using ETABSv1;
 namespace CSiNET8PluginExample1
 {
     /// <summary>
-    /// Creates all IS 875 + IS 1893:2016 load patterns in the ETABS model.
+    /// Creates the IS 875 gravity + IS 875 Part 3 wind load patterns in the model.
     ///
-    /// Pattern naming convention used:
+    /// Pattern naming convention:
     ///   DEAD   — Self-weight (SW multiplier = 1.0)  IS 875 Part 1
     ///   SDL    — Superimposed dead (finishes, partitions, MEP)  IS 875 Part 1
     ///   LIVE   — Floor live load  IS 875 Part 2
-    ///   EQX    — Seismic X-direction  IS 1893:2016
-    ///   EQY    — Seismic Y-direction  IS 1893:2016
-    ///   WLX    — Wind X-direction  IS 875 Part 3
+    ///   WLX    — Wind X-direction  IS 875 Part 3 (pressures applied by Wind tab)
     ///   WLY    — Wind Y-direction  IS 875 Part 3
     ///
-    /// The EQX / EQY patterns are created as Quake-type placeholders; the actual
-    /// seismic force distribution is handled by the Response Spectrum load case
-    /// (created in LoadCaseCreator).  A static Quake pattern is also useful for
-    /// manual story force assignment or notional load purposes.
+    /// Seismic (IS 1893:2016) is delivered by Response Spectrum load CASES
+    /// (see LoadCaseCreator), NOT by static Quake load patterns, so no EQX/EQY
+    /// patterns are created here (doing so would collide with the RS case names).
     ///
-    /// WLX / WLY patterns are created as Wind-type placeholders; actual wind
-    /// pressures per IS 875 Part 3 must be applied separately (wind tunnel or
-    /// code-based lateral pressures applied to faces of the structure).
+    /// Existing patterns are never overwritten — they are skipped so user work is
+    /// preserved and the step is safe to re-run (idempotent).
     /// </summary>
     public class LoadPatternCreator
     {
@@ -36,53 +32,59 @@ namespace CSiNET8PluginExample1
 
         /// <summary>
         /// Creates all required load patterns. Returns a log of actions taken.
-        /// Skips any pattern that already exists to avoid overwriting user work.
         /// </summary>
         public string CreateAllPatterns(BuildingConfig cfg)
         {
             var log = new System.Text.StringBuilder();
-            log.AppendLine("═══ Creating Load Patterns ═══");
+            log.AppendLine("=== Creating Load Patterns ===");
 
-            // ── DEAD: self-weight (SW multiplier = 1.0) ───────────────────────
-            // IS 875 Part 1: unit weights of materials. ETABS applies SW × density
-            // × element volume automatically when SW multiplier = 1.0.
-            AddPattern(cfg.PatternDead, eLoadPatternType.Dead,  1.0, true,  log);
+            // The model must be unlocked before any definition can be added.
+            EtabsModelGuard.EnsureUnlocked(_sapModel, log);
 
-            // ── SDL: superimposed dead (finishes, partitions, services) ────────
-            // IS 875 Part 1: typically 1.0–2.5 kN/m² depending on finishes.
-            // SW multiplier = 0.0 since ETABS self-weight covers structural members.
-            AddPattern(cfg.PatternSDL,  eLoadPatternType.SuperDead, 0.0, true, log);
+            // Cache the existing pattern name list ONCE (avoids an API round-trip
+            // per pattern and keeps behaviour deterministic within this call).
+            var existing = GetExistingPatternNames();
 
-            // ── LIVE: floor live load (IS 875 Part 2) ─────────────────────────
-            AddPattern(cfg.PatternLive, eLoadPatternType.Live,  0.0, true,  log);
+            // DEAD: self-weight (SW multiplier = 1.0). ETABS applies SW automatically.
+            AddPattern(cfg.PatternDead, eLoadPatternType.Dead, 1.0, true, existing, log);
 
-            // ── EQX / EQY: seismic (IS 1893:2016) ────────────────────────────
-            // These are Quake-type patterns. The RS load case references the RS
-            // function, not these patterns directly. Patterns are kept for:
-            //   (a) Notional seismic loads (if ESF method is needed)
-            //   (b) ETABS auto-lateral load assignment (future extension)
-            // addLoadCase = false: the RS case is created explicitly in LoadCaseCreator.
-            AddPattern(cfg.PatternEQX, eLoadPatternType.Quake, 0.0, false, log);
-            AddPattern(cfg.PatternEQY, eLoadPatternType.Quake, 0.0, false, log);
+            // SDL: superimposed dead (finishes, partitions, services). SW mult = 0.0.
+            AddPattern(cfg.PatternSDL, eLoadPatternType.SuperDead, 0.0, true, existing, log);
 
-            // ── WLX / WLY: wind (IS 875 Part 3) ──────────────────────────────
-            AddPattern(cfg.PatternWLX, eLoadPatternType.Wind,  0.0, false, log);
-            AddPattern(cfg.PatternWLY, eLoadPatternType.Wind,  0.0, false, log);
+            // LIVE: floor live load (IS 875 Part 2).
+            AddPattern(cfg.PatternLive, eLoadPatternType.Live, 0.0, true, existing, log);
+
+            // WLX / WLY: wind (IS 875 Part 3) — pressures applied separately.
+            AddPattern(cfg.PatternWLX, eLoadPatternType.Wind, 0.0, true, existing, log);
+            AddPattern(cfg.PatternWLY, eLoadPatternType.Wind, 0.0, true, existing, log);
 
             log.AppendLine($"Load patterns complete. LL={cfg.LiveLoad} kN/m², SDL={cfg.SDL} kN/m²");
             return log.ToString();
         }
 
-        private void AddPattern(string name, eLoadPatternType type, double swMult,
-                                bool addCase, System.Text.StringBuilder log)
+        private HashSet<string> GetExistingPatternNames()
         {
-            // Check if pattern already exists
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             int numPat = 0;
             string[] names = null;
-            _sapModel.LoadPatterns.GetNameList(ref numPat, ref names);
+            if (_sapModel.LoadPatterns.GetNameList(ref numPat, ref names) == 0 && names != null)
+                foreach (var n in names) set.Add(n);
+            return set;
+        }
 
-            if (names != null && Array.Exists(names, n =>
-                string.Equals(n, name, StringComparison.OrdinalIgnoreCase)))
+        private void AddPattern(string name, eLoadPatternType type, double swMult,
+                                bool addCase, HashSet<string> existing,
+                                System.Text.StringBuilder log)
+        {
+            // Validate the name before touching the API. ETABS rejects empty names
+            // and names containing reserved characters; fail fast with a clear log.
+            if (!IsValidName(name))
+            {
+                log.AppendLine($"  FAIL  '{name}' is not a valid load pattern name (empty or reserved chars)");
+                return;
+            }
+
+            if (existing.Contains(name))
             {
                 log.AppendLine($"  SKIP  {name,-12} (already exists)");
                 return;
@@ -90,10 +92,24 @@ namespace CSiNET8PluginExample1
 
             int ret = _sapModel.LoadPatterns.Add(name, type, swMult, addCase);
             if (ret == 0)
+            {
+                existing.Add(name); // keep the cache consistent for the rest of this call
                 log.AppendLine($"  OK    {name,-12} Type={type,-12} SW={swMult:F1}" +
                                (addCase ? "  + auto-case" : ""));
+            }
             else
+            {
                 log.AppendLine($"  FAIL  {name,-12} (API return code {ret})");
+            }
+        }
+
+        // ETABS object names must be non-empty and free of these reserved characters.
+        private static readonly char[] ReservedChars = { '"', '\'', '\\', '/', '\t', '\n', '\r' };
+
+        private static bool IsValidName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            return name.IndexOfAny(ReservedChars) < 0;
         }
     }
 }
