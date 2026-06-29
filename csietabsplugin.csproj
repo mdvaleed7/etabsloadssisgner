@@ -21,7 +21,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="src\EtabsWindAutomation\cPlugin.cs" />
     <Compile Remove="src\EtabsWindAutomation.SmokeTests\**\*.cs" />
     <Compile Remove="src\**\bin\**\*.cs" />
     <Compile Remove="src\**\obj\**\*.cs" />
