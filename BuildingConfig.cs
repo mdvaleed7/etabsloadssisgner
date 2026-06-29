@@ -1,6 +1,6 @@
 using System;
 
-namespace CSiNET8PluginExample1
+namespace AdvatechEtabsPlugin
 {
     // ── Seismic Zone (IS 1893:2016 Table 3) ───────────────────────────────────
     public enum SeismicZone { II, III, IV, V }

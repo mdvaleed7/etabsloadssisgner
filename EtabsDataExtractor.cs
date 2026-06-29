@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using ETABSv1;
 
-namespace CSiNET8PluginExample1
+namespace AdvatechEtabsPlugin
 {
     /// <summary>
     /// Pulls slab geometry, thickness, loads and material grade from the live

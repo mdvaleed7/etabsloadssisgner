@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using ETABSv1;
 
-namespace CSiNET8PluginExample1
+namespace AdvatechEtabsPlugin
 {
     /// <summary>
     /// Creates IS 456:2000 + IS 875 Part 5 Ultimate Limit State (ULS)

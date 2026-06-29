@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using ETABSv1;
 
-namespace CSiNET8PluginExample1
+namespace AdvatechEtabsPlugin
 {
     /// <summary>
     /// Creates the IS 875 gravity + IS 875 Part 3 wind load patterns in the model.

@@ -6,7 +6,7 @@ using System.Windows.Forms;
 using ETABSv1;
 using EtabsWindAutomation;
 
-namespace CSiNET8PluginExample1
+namespace AdvatechEtabsPlugin
 {
     public partial class Form1 : Form
     {

@@ -2,7 +2,7 @@ using ETABSv1;
 using System;
 using System.Windows.Forms;
 
-namespace CSiNET8PluginExample1
+namespace AdvatechEtabsPlugin
 {
     public class cPlugin : cPluginContract
     {

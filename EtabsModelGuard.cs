@@ -2,7 +2,7 @@ using System;
 using System.Text;
 using ETABSv1;
 
-namespace CSiNET8PluginExample1
+namespace AdvatechEtabsPlugin
 {
     /// <summary>
     /// Centralises the ETABS model lock/unlock handling.

@@ -1,6 +1,6 @@
 using System;
 
-namespace CSiNET8PluginExample1
+namespace AdvatechEtabsPlugin
 {
     /// <summary>
     /// Direct Design Method for flat slabs (IS 456 Cl. 31), plus a punching-shear

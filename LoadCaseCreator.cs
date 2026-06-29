@@ -1,7 +1,7 @@
 using System;
 using ETABSv1;
 
-namespace CSiNET8PluginExample1
+namespace AdvatechEtabsPlugin
 {
     /// <summary>
     /// Creates ETABS load cases:

@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace CSiNET8PluginExample1
+namespace AdvatechEtabsPlugin
 {
     /// <summary>
     /// IS 1893 (Part 1):2016 seismic design parameter helper.

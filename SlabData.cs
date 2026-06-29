@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace CSiNET8PluginExample1
+namespace AdvatechEtabsPlugin
 {
     public enum SlabType
     {

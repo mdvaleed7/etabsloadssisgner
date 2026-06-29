@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using ETABSv1;
 using System.Windows.Forms;
 
-namespace CSiNET8PluginExample1
+namespace AdvatechEtabsPlugin
 {
     /// <summary>
     /// Writes optimised slab thicknesses back into ETABS as new shell-section

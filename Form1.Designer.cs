@@ -1,4 +1,4 @@
-namespace CSiNET8PluginExample1
+namespace AdvatechEtabsPlugin
 {
     partial class Form1
     {

@@ -1,6 +1,6 @@
 using System;
 
-namespace CSiNET8PluginExample1
+namespace AdvatechEtabsPlugin
 {
     public static class EffectiveSpanCalculator
     {

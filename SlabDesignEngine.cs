@@ -1,6 +1,6 @@
 using System;
 
-namespace CSiNET8PluginExample1
+namespace AdvatechEtabsPlugin
 {
     /// <summary>
     /// Drives the slab-thickness-optimisation loop for One-Way, Two-Way and

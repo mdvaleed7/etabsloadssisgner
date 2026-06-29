@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using ETABSv1;
 
-namespace CSiNET8PluginExample1
+namespace AdvatechEtabsPlugin
 {
     /// <summary>
     /// Assigns gravity loads to area (slab) and frame (beam) objects.
