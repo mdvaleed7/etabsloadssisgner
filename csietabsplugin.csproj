@@ -6,8 +6,8 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RootNamespace>LoadAssignerPlugin</RootNamespace>
-    <AssemblyName>LoadAssigner</AssemblyName>
+    <RootNamespace>CSiNET8PluginExample1</RootNamespace>
+    <AssemblyName>AdvatechEtabsPlugin</AssemblyName>
 
     <!-- PATCH: ETABS 22 is 64-bit only. Building AnyCPU and dropping the DLL
          into ETABS' Plugins folder works, but pinning x64 prevents the wrong
@@ -19,6 +19,19 @@
     <!-- Surface only real problems; treat nullability info as suggestions -->
     <NoWarn>$(NoWarn);CS8600;CS8601;CS8602;CS8603;CS8604;CS8618;CS8622;CS8625;CS8765</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="src\EtabsWindAutomation\cPlugin.cs" />
+    <Compile Remove="src\EtabsWindAutomation.SmokeTests\**\*.cs" />
+    <Compile Remove="src\**\bin\**\*.cs" />
+    <Compile Remove="src\**\obj\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="src\EtabsWindAutomation\wind-settings.json"
+          Link="wind-settings.json"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 
   <ItemGroup>
     <!--
