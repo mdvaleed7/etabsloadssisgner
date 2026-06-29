@@ -129,6 +129,40 @@ namespace AdvatechEtabsPlugin
         }
 
         /// <summary>
+        /// Closed-form design acceleration spectrum Sa/g for 5% damping
+        /// (IS 1893 (Part 1):2016 Cl. 6.4.2, equations for the three soil types).
+        ///
+        /// For the EQUIVALENT STATIC method (Cl. 7.6) the code applies these
+        /// expressions directly at the fundamental period Ta.  The piecewise
+        /// branches are:
+        ///
+        ///   Type I  (rock / hard):   Sa/g = 1+15T (T≤0.10) ; 2.50 (0.10–0.40) ; 1.00/T (>0.40)
+        ///   Type II (medium):        Sa/g = 1+15T (T≤0.10) ; 2.50 (0.10–0.55) ; 1.36/T (>0.55)
+        ///   Type III(soft):          Sa/g = 1+15T (T≤0.10) ; 2.50 (0.10–0.67) ; 1.67/T (>0.67)
+        ///
+        /// A floor of Sa/g = 0 is NOT applied here; the long-period tail follows
+        /// the 1/T branch (the code does not impose an explicit Sa/g floor for
+        /// the static method — the minimum base-shear check is handled separately
+        /// by the design coefficient, not the spectrum).
+        /// </summary>
+        public static double GetSpectralAcceleration(SiteClass soil, double T)
+        {
+            if (T <= 0) return 2.5;            // peak plateau for degenerate input
+            if (T <= 0.10) return 1.0 + 15.0 * T;
+
+            switch (soil)
+            {
+                case SiteClass.Type_I_Hard:
+                    return T <= 0.40 ? 2.50 : 1.00 / T;
+                case SiteClass.Type_III_Soft:
+                    return T <= 0.67 ? 2.50 : 1.67 / T;
+                case SiteClass.Type_II_Medium:
+                default:
+                    return T <= 0.55 ? 2.50 : 1.36 / T;
+            }
+        }
+
+        /// <summary>
         /// Damping correction factor (IS 1893:2016 Cl. 6.4.2).
         /// Multiplies the 5% spectrum Sa/g values to obtain the value at a different damping.
         /// </summary>

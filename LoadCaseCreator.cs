@@ -92,18 +92,20 @@ namespace AdvatechEtabsPlugin
             double[] p = (double[])periods.Clone();
             double[] v = (double[])saG.Clone();
 
-            // ETABS 22 API no longer exposes SetUser on cFunctionRS in the primary interop wrapper.
-            // int ret = _sapModel.Func.FuncRS.SetUser(funcName, p.Length, ref p, ref v, 0.05);
-            int ret = 1;
+            // FIX: the original build DISABLED this call ("ret = 1") claiming the
+            // API was missing.  In reality Func.FuncRS.SetUser exists across
+            // ETABS v18..v23 — it is invoked here through the version-tolerant
+            // EtabsApi adapter so the IS 1893 spectrum is now defined automatically.
+            int ret = EtabsApi.SetUserResponseSpectrum(_sapModel, funcName, p, v, 0.05, out string rsDet);
             if (ret != 0)
             {
-                log.AppendLine($"  WARN  RS function '{funcName}' API missing in ETABSv1.dll. " +
-                               "Define the IS 1893 spectrum manually in ETABS.");
+                log.AppendLine($"  WARN  RS function '{funcName}' could not be set automatically " +
+                               $"(ret={ret}, {rsDet}). Define the IS 1893 spectrum manually in ETABS.");
                 return;
             }
 
             log.AppendLine($"  OK    RS function '{funcName}' — {p.Length} (T,Sa/g) points, " +
-                           $"soil {cfg.SoilType}, baseline 5% damping");
+                           $"soil {cfg.SoilType}, baseline 5% damping [{rsDet}]");
         }
 
         // -- 3. EQX and EQY Response Spectrum Load Cases -----------------------
@@ -153,19 +155,22 @@ namespace AdvatechEtabsPlugin
             ret = _sapModel.LoadCases.ResponseSpectrum.SetModalCase(caseName, cfg.CaseModal);
             if (ret != 0) log.AppendLine($"  WARN  RS case '{caseName}' SetModalCase (ret={ret})");
 
-            // IS 1893:2016 Cl. 7.7.5.4 — modal combination CQC (rigid/closely-spaced modes).
-            // SetModalComb(Name, MyType, F1, F2, Td) — F1/F2/Td only used by GMC/DblSum.
-            // ret = _sapModel.LoadCases.ResponseSpectrum.SetModalComb(
-            //     caseName, MODALCOMB_CQC, 0.0, 0.0, 0.0);
-            // if (ret != 0) log.AppendLine($"  WARN  RS case '{caseName}' SetModalComb (ret={ret})");
+            // FIX: these three calls were DISABLED in the original build. They are
+            // genuinely available on ETABS v18..v23 and are now invoked through the
+            // version-tolerant EtabsApi adapter (which probes SetModalComb /
+            // SetModalComb_1 etc.), so the RS case is fully IS 1893-compliant.
 
-            // Directional combination SRSS (single direction here, but set explicitly).
-            // ret = _sapModel.LoadCases.ResponseSpectrum.SetDirComb(caseName, DIRCOMB_SRSS, 0.0);
-            // if (ret != 0) log.AppendLine($"  WARN  RS case '{caseName}' SetDirComb (ret={ret})");
+            // IS 1893:2016 Cl. 7.7.5.4 — modal combination CQC (closely-spaced modes).
+            int rmc = EtabsApi.SetModalCombination(_sapModel, caseName, MODALCOMB_CQC, out string mcDet);
+            if (rmc != 0) log.AppendLine($"  WARN  RS case '{caseName}' SetModalComb (ret={rmc}, {mcDet})");
 
-            // Constant modal damping equal to the configured ratio (IS 1893 Cl. 7.2).
-            // ret = _sapModel.LoadCases.ResponseSpectrum.SetDampConstant(caseName, cfg.DampingRatio);
-            // if (ret != 0) log.AppendLine($"  WARN  RS case '{caseName}' SetDampConstant (ret={ret})");
+            // Directional combination SRSS.
+            int rdc = EtabsApi.SetDirectionalCombination(_sapModel, caseName, DIRCOMB_SRSS, out string dcDet);
+            if (rdc != 0) log.AppendLine($"  WARN  RS case '{caseName}' SetDirComb (ret={rdc}, {dcDet})");
+
+            // Constant modal damping per IS 1893 Cl. 7.2.4 (5% for RC/steel).
+            int rdamp = EtabsApi.SetConstantDamping(_sapModel, caseName, cfg.DampingRatio, out string dmpDet);
+            if (rdamp != 0) log.AppendLine($"  WARN  RS case '{caseName}' SetDampConstant (ret={rdamp}, {dmpDet})");
 
             log.AppendLine($"  OK    RS case '{caseName}' dir={direction} " +
                            $"scale={scaleFactor:F5} modal={cfg.CaseModal} " +
@@ -186,24 +191,18 @@ namespace AdvatechEtabsPlugin
             // SetMassSource(Name, FromElements, FromMasses, FromLoads, IsDefault,
             //               NumberLoads, ref LoadPat[], ref SF[])
             // Mass from element self-weight + the gravity load patterns above.
-            int ret;
-            try
+            // FIX: the original build DISABLED the mass-source call and threw.
+            // The mass source IS settable across ETABS v18..v23 — on some builds
+            // via SapModel.SourceMass.SetMassSource and on others via
+            // SapModel.PropMaterial.SetMassSource_1.  The EtabsApi adapter probes
+            // both homes and the 8-/9-argument signatures, so this now succeeds
+            // automatically and only degrades to a manual hint if no variant is
+            // present on the host build.
+            int ret = EtabsApi.SetMassSource(_sapModel, "MsSrc1", loadPats, sf, out string msDet);
+            if (ret != 0)
             {
-                // ETABS 22 removes SourceMass from cSapModel
-                // ret = _sapModel.SourceMass.SetMassSource(
-                //     "MsSrc1",
-                //     MassFromElements: true,
-                //     MassFromMasses: true,
-                //     MassFromLoads: true,
-                //     IsDefault: true,
-                //     NumberLoads: loadPats.Length,
-                //     ref loadPats, ref sf);
-                ret = 1; throw new Exception("SourceMass not available in ETABSv1 API");
-            }
-            catch (Exception ex)
-            {
-                log.AppendLine($"  WARN  Mass source API unavailable ({ex.Message}). " +
-                               "Set Define > Mass Source manually.");
+                log.AppendLine($"  WARN  Mass source not set automatically (ret={ret}, {msDet}). " +
+                               "Set Define ▸ Mass Source manually.");
                 return;
             }
 

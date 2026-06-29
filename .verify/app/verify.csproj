@@ -11,6 +11,11 @@
     <Compile Include="../stub/ETABSv1.cs" />
     <Compile Include="../../BuildingConfig.cs" />
     <Compile Include="../../SeismicHelper.cs" />
+    <Compile Include="../../SeismicData.cs" />
+    <Compile Include="../../TimePeriodCalculator.cs" />
+    <Compile Include="../../EtabsApi.cs" />
+    <Compile Include="../../EquivalentStaticSeismicBuilder.cs" />
+    <Compile Include="../../ResponseSpectrumScaler.cs" />
     <Compile Include="../../EtabsModelGuard.cs" />
     <Compile Include="../../LoadPatternCreator.cs" />
     <Compile Include="../../LoadCaseCreator.cs" />
